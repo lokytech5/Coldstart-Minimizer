@@ -1,12 +1,7 @@
 name: Terraform Destroy
 
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment (dev/staging/etc.)"
-        required: true
-        default: "dev"
+  workflow_dispatch: # Manual trigger
 
 jobs:
   destroy:
@@ -17,27 +12,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.5.0
-
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: arn:aws:iam::061039798341:role/github-actions-plugfolio-role
           aws-region: us-east-1
           role-session-name: GitHubActionsPlugfolio
-
       - name: Terraform Init
         run: terraform init
         working-directory: ./terraform
-
-      - name: Terraform Plan Destroy
-        run: terraform plan -destroy -out=tfplan
-        working-directory: ./terraform
-
       - name: Terraform Destroy
-        run: terraform apply -auto-approve tfplan
+        run: terraform destroy -auto-approve
         working-directory: ./terraform
