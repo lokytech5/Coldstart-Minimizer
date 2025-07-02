@@ -16,13 +16,3 @@ resource "aws_s3_bucket" "demo_bucket" {
 resource "random_id" "suffix" {
   byte_length = 4
 }
-
-resource "aws_ecr_repository" "plugfolio_repo" {
-  name                 = "plugfolio-app"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-  tags = {
-    Name = "PlugfolioECRRepo"
-  }
-
-}
