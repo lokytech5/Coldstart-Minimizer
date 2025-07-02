@@ -1,10 +1,17 @@
 name: Terraform Destroy
 
 on:
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm infrastructure destruction'
+        required: true
+        default: "no"
+        type: string
 
 jobs:
   destroy:
+    if: ${{ github.event.inputs.confirm == 'destroy' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -12,19 +19,31 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.5.0
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          role-to-assume: arn:aws:iam::061039798341:role/github-actions-plugfolio-role
+          role-to-assume: arn:aws:iam::061039798341:role/github-action-ColdStartRole
           aws-region: us-east-1
-          role-session-name: GitHubActionsPlugfolio
+          role-session-name: GitHubActionsColdStartMinimizer
+
       - name: Terraform Init
-        run: terraform init
         working-directory: ./terraform
-      - name: Terraform Destroy
-        run: terraform destroy -auto-approve
+        run: |
+          terraform init \
+            -backend-config="bucket=coldstart-minimizer" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table="coldStartMinizer-Lock"
+      - name: Terraform Destroy Plan
         working-directory: ./terraform
+        run: terraform plan -destroy -out=tfplan
+      - name: Terraform Destroy Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve tfplan
