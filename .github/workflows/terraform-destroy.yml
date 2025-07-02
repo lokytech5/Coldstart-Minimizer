@@ -36,11 +36,11 @@ jobs:
         working-directory: ./terraform
         run: |
           terraform init \
-            -backend-config="bucket=coldstart-minimizer" \
+            -backend-config="bucket=coldstartminimizer-state" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=us-east-1" \
             -backend-config="encrypt=true" \
-            -backend-config="dynamodb_table="coldStartMinizer-Lock"
+            -backend-config="dynamodb_table="coldStartMinimizer-Lock"
       - name: Terraform Destroy Plan
         working-directory: ./terraform
         run: terraform plan -destroy -out=tfplan
