@@ -1,9 +1,8 @@
 provider "aws" {
   region = "us-east-1"
 }
-#comment
 
-#comment here
+
 resource "aws_s3_bucket" "demo_bucket" {
   bucket        = "demo-bucket-${random_id.suffix.hex}"
   force_destroy = true
