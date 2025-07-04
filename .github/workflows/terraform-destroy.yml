@@ -39,7 +39,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="bucket=coldstartminimizer-state" \
-            -backend-config="key=terraform.tfstate" \
+            -backend-config="key=dev/terraform.tfstate" \
             -backend-config="region=us-east-1" \
             -backend-config="encrypt=true" \
             -backend-config="dynamodb_table=coldStartMinizer-Lock"
