@@ -42,8 +42,10 @@ jobs:
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=us-east-1" \
             -backend-config="encrypt=true" \
-            -backend-config="dynamodb_table=coldStartMinimizer-Lock"
-
+            -backend-config="dynamodb_table=coldStartMinizer-Lock"
+      - name: Terraform State Check
+        working-directory: ./terraform
+        run: terraform state list
       - name: Terraform Destroy Plan
         working-directory: ./terraform
         run: terraform plan -destroy -out=tfplan
