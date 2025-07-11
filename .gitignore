@@ -1,12 +1,20 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
 env/
 venv/
-*.egg-info/
+.venv/
+ENV/
+.ENV/
 
 # Terraform
 .terraform/
@@ -14,13 +22,28 @@ venv/
 *.tfstate.backup
 *.tfstate.*.backup
 terraform.tfstate.d/
+crash.log
 
 # AWS
 *.aws
+.aws/
 credentials
 config
 
-# Local
+# Local & OS
 .DS_Store
 *.log
 *.env
+*.swp
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Project-specific
+docs/results/
+scripts/__pycache__/
+src/lambda/*.zip

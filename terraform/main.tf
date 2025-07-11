@@ -21,10 +21,21 @@ variable "endpoint_name" {
   default = "deepar-ecommerce-endpoint"
 }
 
+variable "endpoint_arn" {
+  type    = string
+  default = "arn:aws:sagemaker:us-east-1:061039798341:endpoint/deepar-ecommerce-endpoint"
+}
+
 variable "threshold" {
   type    = number
   default = 130
 }
+
+variable "model_data_url" {
+  description = "S3 URI for the trained SageMaker model artifact"
+  type        = string
+}
+
 
 #Fecthing neccessary role premission from AWS IAM
 data "aws_iam_role" "Coldstart_Lambda_Role" {
@@ -81,8 +92,8 @@ resource "aws_lambda_permission" "allow_cloudwatch" {
 resource "aws_lambda_function" "data_collector" {
   function_name    = "data_collector"
   handler          = "data_collector.lambda_handler"
-  runtime          = "pythion3.10"
-  role             = ""
+  runtime          = "python3.13"
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   filename         = "${path.module}/../src/lambda/data_collector.zip"
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/data_collector.zip")
 }
@@ -94,7 +105,7 @@ resource "aws_cloudwatch_event_rule" "collect_metrics_target" {
 }
 
 resource "aws_cloudwatch_event_target" "collect_metrics_target" {
-  rule      = aws_cloudwatch_event_rule.collect_metrics.name
+  rule      = aws_cloudwatch_event_rule.collect_metrics_target.name
   target_id = "data_collector"
   arn       = aws_lambda_function.data_collector.arn
 }
@@ -106,7 +117,7 @@ resource "aws_lambda_permission" "allow_cloudwatch_data" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.data_collector.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.collect_metrics.arn
+  source_arn    = aws_cloudwatch_event_rule.collect_metrics_target.arn
 }
 
 
@@ -140,51 +151,16 @@ resource "aws_sfn_state_machine" "jit_workflow" {
   })
 }
 
-# SageMaker Training Job
-resource "aws_sagemaker_training_job" "deepar_training" {
-  name     = "deepar-training-${formatdate("YYYYMMDDhhmmss", timestamp())}"
-  role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
-  algorithm_specification {
-    training_image      = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepar:latest"
-    training_input_mode = "File"
-  }
-  output_data_config {
-    s3_output_path = "s3://${var.bucket_name}/output/"
-  }
-  resource_config {
-    instance_count    = 1
-    instance_type     = "ml.m5.large"
-    volume_size_in_gb = 10
-  }
-  hyper_parameters = {
-    "time_freq"         = "min"
-    "context_length"    = "60"
-    "prediction_length" = "10"
-    "num_cells"         = "50"
-    "epochs"            = "100"
-  }
-  input_data_config {
-    channel_name = "train"
-    data_source {
-      s3_data_source {
-        s3_data_type = "S3Prefix"
-        s3_uri       = "s3://${var.bucket_name}/training/"
-      }
-    }
-    content_type = "json"
-  }
-}
-
 # SageMaker Model
 resource "aws_sagemaker_model" "deepar_model" {
   name               = "${var.endpoint_name}-model"
   execution_role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
   primary_container {
     image          = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepar:latest"
-    model_data_url = aws_sagemaker_training_job.deepar_training.output_data_config[0].s3_output_path
+    model_data_url = var.model_data_url
   }
-  depends_on = [aws_sagemaker_training_job.deepar_training]
 }
+
 
 # SageMaker Endpoint Configuration
 resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
@@ -195,12 +171,5 @@ resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
     initial_instance_count = 1
     instance_type          = "ml.m5.large"
   }
-  depends_on = [aws_sagemaker_training_job.deepar_training]
-}
-
-# SageMaker Endpoint
-resource "aws_sagemaker_endpoint" "deepar_endpoint" {
-  name                 = var.endpoint_name
-  endpoint_config_name = aws_sagemaker_endpoint_configuration.deepar_endpoint_config.name
-  depends_on           = [aws_sagemaker_endpoint_configuration.deepar_endpoint_config]
+  depends_on = [aws_sagemaker_model.deepar_model]
 }
