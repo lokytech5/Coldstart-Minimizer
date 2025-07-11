@@ -42,7 +42,7 @@ data "aws_iam_role" "Coldstart_StepFunction_Role" {
 #Lamba Function: init_manager
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
-  role             = ""
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   handler          = "init_manager.lambda_handler"
   runtime          = "python3.13"
   architectures    = ["x86_64"]
@@ -60,19 +60,22 @@ resource "aws_lambda_function" "init_manager" {
 #cloudwatch(EventBridge) Rule for init_manager
 resource "aws_cloudwatch_event_rule" "every_one_minute" {
   name                = "every-one-minute"
-  schedule_expression = "rate(1 mintue)"
+  schedule_expression = "rate(1 minute)"
 }
 
-#Check me out!!!!
 resource "aws_cloudwatch_event_target" "check_cold_start" {
-  rule      = ""
+  rule      = aws_cloudwatch_event_rule.every_one_minute.name
   target_id = "init_manager"
-  arn       = ""
+  arn       = aws_lambda_function.init_manager.arn
 }
 
-#Premission Code here
-
-
+resource "aws_lambda_permission" "allow_cloudwatch" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.init_manager.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.every_one_minute.arn
+}
 
 #Lambda Function: data Collector
 resource "aws_lambda_function" "data_collector" {
@@ -86,24 +89,32 @@ resource "aws_lambda_function" "data_collector" {
 
 resource "aws_cloudwatch_event_rule" "collect_metrics_target" {
   name                = "collect_metrics"
-  schedule_expression = "rate(5 mintues)"
+  schedule_expression = "rate(5 minutes)"
   depends_on          = [aws_lambda_function.data_collector]
 }
 
 resource "aws_cloudwatch_event_target" "collect_metrics_target" {
-  rule      = ""
+  rule      = aws_cloudwatch_event_rule.collect_metrics.name
   target_id = "data_collector"
-  arn       = ""
+  arn       = aws_lambda_function.data_collector.arn
 }
 
 #Premission Code here
+
+resource "aws_lambda_permission" "allow_cloudwatch_data" {
+  statement_id  = "AllowExecutionFromCloudWatchData"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.data_collector.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.collect_metrics.arn
+}
 
 
 #Step functions State Machine
 resource "aws_sfn_state_machine" "jit_workflow" {
   name     = "ecommerce_jit_workflow"
-  role_arn = ""
-  definition = jsondecode({
+  role_arn = data.aws_iam_role.Coldstart_StepFunction_Role.arn
+  definition = jsonencode({
     Comment = "Workflow to handle JIT Lambda initialization",
     StartAt = "CheckForecast",
     States = {
