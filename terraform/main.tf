@@ -26,6 +26,19 @@ variable "threshold" {
   default = 130
 }
 
+#Fecthing neccessary role premission from AWS IAM
+data "aws_iam_role" "Coldstart_Lambda_Role" {
+  name = "ColdStartLambdaRole"
+}
+
+data "aws_iam_role" "Coldstart_Sagemaker_Role" {
+  name = "ColdStartSageMakerRole"
+}
+
+data "aws_iam_role" "Coldstart_StepFunction_Role" {
+  name = "ColdStartStepFunctionRole"
+}
+
 #Lamba Function: init_manager
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
