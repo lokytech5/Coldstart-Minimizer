@@ -16,7 +16,11 @@ output_uri = (
 )
 training_job_name = f"deepar-training-{int(time.time())}"
 model_name = f"deepar-model-{int(time.time())}"
-role_arn = "arn:aws:iam::061039798341:role/service-role/AmazonSageMaker-ExecutionRole-20250704T082477"
+role_arn = (
+    "arn:aws:iam::061039798341:role/service-role/"
+    "AmazonSageMaker-ExecutionRole-20250704T082477"
+)
+
 training_image = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepar:latest"
 
 
