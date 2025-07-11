@@ -11,7 +11,9 @@ s3 = boto3.client("s3", region_name=region)
 bucket = "sagemaker-us-east-1-061039798341"
 json_data_prefix = "deepar-json/"
 train_data_uri = f"s3://{bucket}/{json_data_prefix}"
-output_uri = f"s3://{bucket}/output/"
+output_uri = (
+    f"s3://{bucket}/output/"
+)
 training_job_name = f"deepar-training-{int(time.time())}"
 model_name = f"deepar-model-{int(time.time())}"
 role_arn = "arn:aws:iam::061039798341:role/service-role/AmazonSageMaker-ExecutionRole-20250704T082477"

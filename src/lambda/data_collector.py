@@ -28,7 +28,7 @@ def lambda_handler(event, context):
     try:
         obj = s3.get_object(Bucket=bucket, Key=key)
         existing_data = json.loads(obj["Body"].read())
-    except:
+    except Exception:
         pass
     new_data = [
         {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
