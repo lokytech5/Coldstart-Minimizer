@@ -10,6 +10,8 @@ def lambda_handler(event, context):
     bucket = os.environ["BUCKET_NAME"]
     threshold = float(os.environ.get("THRESHOLD", 130))
     s3 = boto3.client("s3")
+    lambda_client = boto3.client("lambda")
+    target_function = "init_manager"  # Replace with actual function name
     key = "training/cloudwatch_metrics.json"
 
     # Get latest training data for context
@@ -41,4 +43,8 @@ def lambda_handler(event, context):
         return {"forecast": forecast, "trigger": False}
     elif action == "init":
         print("Initializing JIT")
+        lambda_client.invoke(
+            FunctionName=target_function,
+            InvocationType="Event"  # Asynchronous warm-up
+        )
         return {"status": "initialized"}

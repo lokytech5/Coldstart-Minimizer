@@ -139,3 +139,68 @@ resource "aws_sfn_state_machine" "jit_workflow" {
     }
   })
 }
+
+# SageMaker Training Job
+resource "aws_sagemaker_training_job" "deepar_training" {
+  name     = "deepar-training-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+  role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
+  algorithm_specification {
+    training_image      = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepar:latest"
+    training_input_mode = "File"
+  }
+  output_data_config {
+    s3_output_path = "s3://${var.bucket_name}/output/"
+  }
+  resource_config {
+    instance_count    = 1
+    instance_type     = "ml.m5.large"
+    volume_size_in_gb = 10
+  }
+  hyper_parameters = {
+    "time_freq"         = "min"
+    "context_length"    = "60"
+    "prediction_length" = "10"
+    "num_cells"         = "50"
+    "epochs"            = "100"
+  }
+  input_data_config {
+    channel_name = "train"
+    data_source {
+      s3_data_source {
+        s3_data_type = "S3Prefix"
+        s3_uri       = "s3://${var.bucket_name}/training/"
+      }
+    }
+    content_type = "json"
+  }
+}
+
+# SageMaker Model
+resource "aws_sagemaker_model" "deepar_model" {
+  name               = "${var.endpoint_name}-model"
+  execution_role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
+  primary_container {
+    image          = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepar:latest"
+    model_data_url = aws_sagemaker_training_job.deepar_training.output_data_config[0].s3_output_path
+  }
+  depends_on = [aws_sagemaker_training_job.deepar_training]
+}
+
+# SageMaker Endpoint Configuration
+resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
+  name = "${var.endpoint_name}-config"
+  production_variants {
+    variant_name           = "default"
+    model_name             = aws_sagemaker_model.deepar_model.name
+    initial_instance_count = 1
+    instance_type          = "ml.m5.large"
+  }
+  depends_on = [aws_sagemaker_training_job.deepar_training]
+}
+
+# SageMaker Endpoint
+resource "aws_sagemaker_endpoint" "deepar_endpoint" {
+  name                 = var.endpoint_name
+  endpoint_config_name = aws_sagemaker_endpoint_configuration.deepar_endpoint_config.name
+  depends_on           = [aws_sagemaker_endpoint_configuration.deepar_endpoint_config]
+}
