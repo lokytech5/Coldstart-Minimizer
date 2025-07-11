@@ -1,6 +1,5 @@
 import boto3
 import json
-import os
 from datetime import datetime, timedelta
 import logging
 
@@ -48,10 +47,7 @@ def invoke_lambda(function_name, payload):
 def test_workflow():
     """Test the end-to-end workflow locally."""
     bucket = "sagemaker-us-east-1-061039798341"
-    endpoint_name = "deepar-ecommerce-endpoint"
     threshold = 130
-    # Replace with actual function name
-    target_function = "your-target-lambda-function"
 
     # Step 1: Prepare test data
     prepare_test_data(bucket)

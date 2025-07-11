@@ -30,8 +30,13 @@ def lambda_handler(event, context):
         existing_data = json.loads(obj["Body"].read())
     except:
         pass
-    new_data = [{"start": str(datetime.utcnow() - timedelta(minutes=i*5)), "target": [int(val)]}
-                for i, val in enumerate(reversed(response["MetricDataResults"][0]["Values"] or [0]*288))]
+    new_data = [
+        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
+         "target": [int(val)]}
+        for i, val in enumerate(
+            reversed(response["MetricDataResults"][0]["Values"] or [0]*288)
+        )
+    ]
     # Avoid excessive growth, keep recent half
     updated_data = existing_data + new_data[:len(new_data)//2]
 
