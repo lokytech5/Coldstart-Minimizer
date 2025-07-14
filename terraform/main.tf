@@ -53,9 +53,9 @@ data "aws_iam_role" "Coldstart_StepFunction_Role" {
 # Target Function
 resource "aws_lambda_function" "target_function" {
   function_name    = "target_function"
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   handler          = "target_function.lambda_handler"
   runtime          = "python3.13"
-  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   filename         = "${path.module}/../src/lambda/target_function.zip"
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/target_function.zip")
   memory_size      = 256

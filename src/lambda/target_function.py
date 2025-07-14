@@ -1,10 +1,8 @@
-# target_function.py
 import boto3
 import time
 import numpy as np
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -20,7 +18,7 @@ def lambda_handler(event, context):
         "COLD_START" not in custom or custom.get("COLD_START") != "true"
     )
 
-    # Simulate e-commerce workload: product lookup with CPU-intensive task
+    # Simulate e-commerce workload: product lookup with CPU-intensive tasks
     try:
         # Mock database query (S3 access)
         s3_response = s3.list_objects_v2(Bucket=bucket, Prefix="training/")

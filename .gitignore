@@ -46,4 +46,4 @@ config
 # Project-specific
 docs/results/
 scripts/__pycache__/
-src/lambda/*.zip
+# src/lambda/*.zip

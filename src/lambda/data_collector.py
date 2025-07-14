@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 import logging
 
-# Configure logging
+# Configure logg
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
