@@ -71,6 +71,7 @@ resource "aws_lambda_function" "init_manager" {
   architectures    = ["x86_64"]
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/init_manager.zip")
   filename         = "${path.module}/../src/lambda/init_manager.zip"
+  timeout          = 30
   environment {
     variables = {
       BUCKET_NAME     = var.bucket_name
