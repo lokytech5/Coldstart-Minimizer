@@ -10,18 +10,26 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_test_data(bucket="sagemaker-us-east-1-061039798341"):
-    """Prepare synthetic test data for local testing."""
+    """Prepare synthetic test data with a spike for local testing."""
     s3 = boto3.client("s3")
+    # 12 intervals (1 hour, 5-minute steps), with a spike at 30 minutes (6th interval)
     test_data = [
         {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [100 + i*10]}
-        for i in range(12)  # 1 hour of data, 5-minute intervals
+         "target": [100 + i*10]}  # Baseline
+        for i in range(6)  # First 30 minutes
     ]
+    test_data.append({"start": str(datetime.utcnow() -
+                     timedelta(minutes=30)), "target": [300]})  # Spike at 300
+    test_data.extend([
+        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
+         "target": [250 - (i-6)*20]}  # Decay after spike
+        for i in range(7, 12)  # Last 30 minutes
+    ])
     try:
         s3.put_object(Bucket=bucket, Key="training/test_data.json",
                       Body=json.dumps(test_data))
         logger.info(
-            f"Uploaded test data to s3://{bucket}/training/test_data.json")
+            f"Uploaded spiked test data to s3://{bucket}/training/test_data.json")
     except Exception as e:
         logger.error(f"Failed to upload test data: {e}")
         raise
@@ -45,14 +53,14 @@ def invoke_lambda(function_name, payload):
 
 
 def test_workflow():
-    """Test the end-to-end workflow locally."""
+    """Test the end-to-end workflow locally with a spike."""
     bucket = "sagemaker-us-east-1-061039798341"
     threshold = 130
 
-    # Step 1: Prepare test data
+    # Step 1: Prepare test data with spike
     prepare_test_data(bucket)
 
-    # Step 2: Simulate data_collector
+    # Step 2: Simulate data_collector (updates cloudwatch_metrics.json)
     data_collector_payload = {}
     data_collector_result = invoke_lambda(
         "data_collector", data_collector_payload)
@@ -85,7 +93,7 @@ def test_workflow():
 
 def main():
     """Main function to run the testing tool."""
-    logger.info("Starting ColdStart workflow test...")
+    logger.info("Starting ColdStart workflow test with spike...")
     if test_workflow():
         logger.info("All tests passed. Ready to push to CI/CD pipeline.")
     else:

@@ -1,6 +1,7 @@
 import boto3
 import json
 import os
+import base64
 
 
 def lambda_handler(event, context):
@@ -10,7 +11,7 @@ def lambda_handler(event, context):
     threshold = float(os.environ.get("THRESHOLD", 130))
     s3 = boto3.client("s3")
     lambda_client = boto3.client("lambda")
-    target_function = "init_manager"  # Replace with actual function name
+    target_function = os.environ.get("TARGET_FUNCTION", "init_manager")
     key = "training/cloudwatch_metrics.json"
 
     # Get latest training data for context
@@ -39,11 +40,15 @@ def lambda_handler(event, context):
         if max(forecast) > threshold:
             print("Surge detected, initiating JIT initialization")
             return {"forecast": forecast, "trigger": True}
-        return {"forecast": forecast, "trigger": False}
+        return {"forecast": forecast, "trigger": False}  # <-- fixed here
     elif action == "init":
         print("Initializing JIT")
+        client_context = base64.b64encode(
+            json.dumps({"custom": {"COLD_START": "false"}}).encode()
+        ).decode()
         lambda_client.invoke(
             FunctionName=target_function,
-            InvocationType="Event"  # Asynchronous warm-up
+            InvocationType="Event",
+            ClientContext=client_context
         )
         return {"status": "initialized"}
