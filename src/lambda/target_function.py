@@ -1,6 +1,5 @@
 # target_function.py
 import boto3
-import json
 import time
 import numpy as np
 import logging
@@ -16,8 +15,10 @@ bucket = "sagemaker-us-east-1-061039798341"
 
 def lambda_handler(event, context):
     start_time = time.time()
-    is_warm = "COLD_START" not in context.client_context.custom or context.client_context.custom.get(
-        "COLD_START") != "true"
+    custom = getattr(getattr(context, "client_context", None), "custom", {})
+    is_warm = (
+        "COLD_START" not in custom or custom.get("COLD_START") != "true"
+    )
 
     # Simulate e-commerce workload: product lookup with CPU-intensive task
     try:
@@ -30,7 +31,7 @@ def lambda_handler(event, context):
         matrix_size = 100
         a = np.random.rand(matrix_size, matrix_size)
         b = np.random.rand(matrix_size, matrix_size)
-        result = np.dot(a, b)  # Simulate computation
+        _ = np.dot(a, b)  # Simulate computation and avoid flake8 F841
 
         # Simulate API response
         response = {
