@@ -24,7 +24,12 @@ def lambda_handler(event, context):
         EndpointName=endpoint_name,
         ContentType="application/json",
         Body=json.dumps({
-            "instances": [{"start": latest_start, "target": [d["target"][0] for d in training_data[-12:]]}],
+            "instances": [
+                {
+                    "start": latest_start,
+                    "target": [d["target"][0] for d in training_data[-12:]]
+                }
+            ],
             "configuration": {
                 "num_samples": 100,
                 "output_types": ["quantiles"],
@@ -39,7 +44,7 @@ def lambda_handler(event, context):
         if max(forecast) > threshold:
             print("Surge detected, initiating JIT initialization")
             return {"forecast": forecast, "trigger": True}
-        return {"forecast": forecast, "trigger": False}  # <-- fixed here
+        return {"forecast": forecast, "trigger": False}
     elif action == "init":
         print("Initializing JIT")
         client_context = base64.b64encode(
