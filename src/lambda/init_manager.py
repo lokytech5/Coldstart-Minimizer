@@ -25,7 +25,7 @@ def lambda_handler(event, context):
         EndpointName=endpoint_name,
         ContentType="application/json",
         Body=json.dumps({
-            "instances": [{"start": latest_start, "target": [0] * target_length}],
+            "instances": [{"start": latest_start, "target": [d["target"][0] for d in training_data[-12:]]}],
             "configuration": {
                 "num_samples": 100,
                 "output_types": ["quantiles"],

@@ -10,20 +10,23 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_test_data(bucket="sagemaker-us-east-1-061039798341"):
-    """Prepare synthetic test data with a spike for local testing."""
+    """Prepare synthetic test data with a sustained spike for local testing."""
     s3 = boto3.client("s3")
-    # 12 intervals (1 hour, 5-minute steps), with a spike at 30 minutes (6th interval)
+    # 12 intervals (1 hour, 5-minute steps), with a sustained spike from 25-35 minutes
     test_data = [
         {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [100 + i*10]}  # Baseline
-        for i in range(6)  # First 30 minutes
+         "target": [100 + i*5]}  # Baseline
+        for i in range(5)  # First 25 minutes
     ]
-    test_data.append({"start": str(datetime.utcnow() -
-                     timedelta(minutes=30)), "target": [300]})  # Spike at 300
     test_data.extend([
         {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [250 - (i-6)*20]}  # Decay after spike
-        for i in range(7, 12)  # Last 30 minutes
+         "target": [300]}  # Spike at 300 for 10 minutes
+        for i in range(5, 7)  # 25-35 minutes
+    ])
+    test_data.extend([
+        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
+         "target": [250 - (i-7)*20]}  # Decay
+        for i in range(7, 12)  # 35-60 minutes
     ])
     try:
         s3.put_object(Bucket=bucket, Key="training/test_data.json",
