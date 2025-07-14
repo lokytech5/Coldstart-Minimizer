@@ -50,6 +50,18 @@ data "aws_iam_role" "Coldstart_StepFunction_Role" {
   name = "ColdStartStepFunctionRole"
 }
 
+# Target Function
+resource "aws_lambda_function" "target_function" {
+  function_name    = "target_function"
+  handler          = "target_function.lambda_handler"
+  runtime          = "python3.13"
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
+  filename         = "${path.module}/../src/lambda/target_function.zip"
+  source_code_hash = filebase64sha256("${path.module}/../src/lambda/target_function.zip")
+  memory_size      = 256
+  timeout          = 30
+}
+
 #Lamba Function: init_manager
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
@@ -61,9 +73,10 @@ resource "aws_lambda_function" "init_manager" {
   filename         = "${path.module}/../src/lambda/init_manager.zip"
   environment {
     variables = {
-      BUCKET_NAME   = var.bucket_name
-      ENDPOINT_NAME = var.endpoint_name
-      THRESHOLD     = tostring(var.threshold)
+      BUCKET_NAME     = var.bucket_name
+      ENDPOINT_NAME   = var.endpoint_name
+      THRESHOLD       = tostring(var.threshold)
+      TARGET_FUNCTION = "target_function" # Name of the target function to invoke
     }
   }
 }
