@@ -18,7 +18,6 @@ def lambda_handler(event, context):
     obj = s3.get_object(Bucket=bucket, Key=key)
     training_data = json.loads(obj["Body"].read())
     latest_start = max(d["start"] for d in training_data)
-    target_length = len(training_data[0]["target"])
 
     # Get forecast from the SageMaker endpoint
     predictor = boto3.client("sagemaker-runtime").invoke_endpoint(
