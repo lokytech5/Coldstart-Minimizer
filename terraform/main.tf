@@ -96,6 +96,7 @@ resource "aws_lambda_function" "data_collector" {
   role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   filename         = "${path.module}/../src/lambda/data_collector.zip"
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/data_collector.zip")
+  timeout          = 30
 }
 
 resource "aws_cloudwatch_event_rule" "collect_metrics_target" {
