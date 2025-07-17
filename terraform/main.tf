@@ -125,8 +125,6 @@ resource "aws_cloudwatch_event_target" "collect_metrics_target" {
   arn       = aws_lambda_function.data_collector.arn
 }
 
-#Premission Code here
-
 resource "aws_lambda_permission" "allow_cloudwatch_data" {
   statement_id  = "AllowExecutionFromCloudWatchData"
   action        = "lambda:InvokeFunction"
@@ -166,7 +164,6 @@ resource "aws_sfn_state_machine" "jit_workflow" {
   })
 }
 
-# SageMaker Model
 resource "aws_sagemaker_model" "deepar_model" {
   name               = "${var.endpoint_name}-model"
   execution_role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
@@ -187,4 +184,40 @@ resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
     instance_type          = "ml.m5.large"
   }
   depends_on = [aws_sagemaker_model.deepar_model]
+}
+
+#Api gateway endpoint here for frontend
+resource "aws_api_gateway_rest_api" "ecommerce_api" {
+  name        = "EcommerceAPI"
+  description = "Api for ecommerec workload"
+}
+
+resource "aws_api_gateway_resource" "proxy" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api
+  parent_id   = aws_api_gateway_rest_api.ecommerce_api.root_resource
+  path_part   = "target"
+}
+
+resource "aws_api_gateway_method" "proxy_method" {
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id   = aws_api_gateway_resource.proxy.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id             = aws_api_gateway_resource.proxy.id
+  http_method             = aws_api_gateway_method.proxy_method.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.target_function.invoke_arn
+}
+
+resource "aws_lambda_prmission" "apigateway_lambda" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.target_function.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
 }
