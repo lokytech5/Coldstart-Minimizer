@@ -188,36 +188,61 @@ resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
 
 #Api gateway endpoint here for frontend
 resource "aws_api_gateway_rest_api" "ecommerce_api" {
-  name        = "EcommerceAPI"
-  description = "Api for ecommerec workload"
+  name        = "EcommerceJITAPI"
+  description = "API for JIT cold start management"
 }
 
-resource "aws_api_gateway_resource" "proxy" {
-  rest_api_id = aws_api_gateway_rest_api.ecommerce_api
-  parent_id   = aws_api_gateway_rest_api.ecommerce_api.root_resource
-  path_part   = "target"
+resource "aws_api_gateway_resource" "jit_resource" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  parent_id   = aws_api_gateway_rest_api.ecommerce_api.root_resource_id
+  path_part   = "jit-status"
 }
 
-resource "aws_api_gateway_method" "proxy_method" {
+resource "aws_api_gateway_method" "get_jit_status" {
   rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
-  resource_id   = aws_api_gateway_resource.proxy.id
+  resource_id   = aws_api_gateway_resource.jit_resource.id
   http_method   = "GET"
-  authorization = "NONE"
+  authorization = "AWS_IAM"
 }
 
-resource "aws_api_gateway_integration" "lambda_integration" {
+resource "aws_api_gateway_method" "post_jit_init" {
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id   = aws_api_gateway_resource.jit_resource.id
+  http_method   = "POST"
+  authorization = "AWS_IAM"
+}
+
+resource "aws_api_gateway_integration" "lambda_get_integration" {
   rest_api_id             = aws_api_gateway_rest_api.ecommerce_api.id
-  resource_id             = aws_api_gateway_resource.proxy.id
-  http_method             = aws_api_gateway_method.proxy_method.http_method
+  resource_id             = aws_api_gateway_resource.jit_resource.id
+  http_method             = aws_api_gateway_method.get_jit_status.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.target_function.invoke_arn
+  uri                     = aws_lambda_function.init_manager.invoke_arn
 }
 
-resource "aws_lambda_prmission" "apigateway_lambda" {
-  statement_id  = "AllowExecutionFromAPIGateway"
+resource "aws_api_gateway_integration" "lambda_post_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id             = aws_api_gateway_resource.jit_resource.id
+  http_method             = aws_api_gateway_method.post_jit_init.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.init_manager.invoke_arn
+}
+
+resource "aws_api_gateway_deployment" "api_deployment" {
+  depends_on = [
+    aws_api_gateway_integration.lambda_get_integration,
+    aws_api_gateway_integration.lambda_post_integration
+  ]
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  stage_name  = "prod"
+}
+
+resource "aws_lambda_prmission" "apigw_init_manager" {
+  statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.target_function.function_name
+  function_name = aws_lambda_function.init_manager.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
 }
