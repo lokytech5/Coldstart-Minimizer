@@ -47,3 +47,7 @@ config
 docs/results/
 scripts/__pycache__/
 # src/lambda/*.zip
+
+/frontend/daemon/.next
+/frontend/daemon/node_modules
+
