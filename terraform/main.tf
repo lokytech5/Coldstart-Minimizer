@@ -202,14 +202,14 @@ resource "aws_api_gateway_method" "get_jit_status" {
   rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
   resource_id   = aws_api_gateway_resource.jit_resource.id
   http_method   = "GET"
-  authorization = "AWS_IAM"
+  authorization = "NONE"
 }
 
 resource "aws_api_gateway_method" "post_jit_init" {
   rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
   resource_id   = aws_api_gateway_resource.jit_resource.id
   http_method   = "POST"
-  authorization = "AWS_IAM"
+  authorization = "NONE"
 }
 
 resource "aws_api_gateway_integration" "lambda_get_integration" {
