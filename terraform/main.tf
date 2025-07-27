@@ -78,7 +78,6 @@ resource "aws_lambda_function" "init_manager" {
       ENDPOINT_NAME   = var.endpoint_name
       THRESHOLD       = tostring(var.threshold)
       TARGET_FUNCTION = "target_function"
-      SFN_ARN         = aws_sfn_state_machine.jit_workflow.arn
     }
   }
 }
@@ -232,16 +231,22 @@ resource "aws_api_gateway_integration" "lambda_post_integration" {
 }
 
 resource "aws_api_gateway_deployment" "api_deployment" {
-  depends_on = [
-    aws_api_gateway_integration.lambda_get_integration,
-    aws_api_gateway_integration.lambda_post_integration
-  ]
   rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
 
   triggers = {
     redeployment = timestamp()
   }
+
+  depends_on = [
+    aws_api_gateway_integration.lambda_get_integration,
+    aws_api_gateway_integration.lambda_post_integration
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
+
 
 resource "aws_api_gateway_stage" "prod" {
   stage_name    = "prod"
