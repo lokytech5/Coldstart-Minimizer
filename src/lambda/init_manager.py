@@ -40,11 +40,21 @@ def lambda_handler(event, context):
     forecast = json.loads(predictor["Body"].read())[
         "predictions"][0]["quantiles"]["0.5"]
 
+    # This function will wrap your response for API Gateway
+    def api_gateway_response(payload, status=200):
+        return {
+            "statusCode": status,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": json.dumps(payload)
+        }
+
     if action == "check":
         if max(forecast) > threshold:
             print("Surge detected, initiating JIT initialization")
-            return {"forecast": forecast, "trigger": True}
-        return {"forecast": forecast, "trigger": False}
+            return api_gateway_response({"forecast": forecast, "trigger": True})
+        return api_gateway_response({"forecast": forecast, "trigger": False})
     elif action == "init":
         print("Initializing JIT")
         client_context = base64.b64encode(
@@ -55,4 +65,4 @@ def lambda_handler(event, context):
             InvocationType="Event",
             ClientContext=client_context
         )
-        return {"status": "initialized"}
+        return api_gateway_response({"status": "initialized"})

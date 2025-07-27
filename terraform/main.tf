@@ -236,10 +236,15 @@ resource "aws_api_gateway_deployment" "api_deployment" {
     aws_api_gateway_integration.lambda_post_integration
   ]
   rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
-  stage_name  = "prod"
 }
 
-resource "aws_lambda_prmission" "apigw_init_manager" {
+resource "aws_api_gateway_stage" "prod" {
+  stage_name    = "prod"
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  deployment_id = aws_api_gateway_deployment.api_deployment.id
+}
+
+resource "aws_lambda_permission" "api_init_manager" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.init_manager.function_name

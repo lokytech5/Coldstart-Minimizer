@@ -25,11 +25,11 @@ def lambda_handler(event, context):
         item_count = len(s3_response.get("Contents", [])
                          ) if "Contents" in s3_response else 0
 
-        # CPU-intensive task (e.g., matrix multiplication for recommendation engine)
+        # CPU-intensive task
         matrix_size = 100
         a = np.random.rand(matrix_size, matrix_size)
         b = np.random.rand(matrix_size, matrix_size)
-        _ = np.dot(a, b)  # Simulate computation and avoid flake8 F841
+        _ = np.dot(a, b)
 
         # Simulate API response
         response = {
