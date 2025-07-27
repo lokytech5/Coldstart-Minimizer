@@ -11,9 +11,7 @@ def lambda_handler(event, context):
     threshold = float(os.environ.get("THRESHOLD", 130))
     s3 = boto3.client("s3")
     lambda_client = boto3.client("lambda")
-    stepfunctions = boto3.client("stepfunctions")
     target_function = os.environ.get("TARGET_FUNCTION", "init_manager")
-    state_machine_arn = "arn:aws:states:us-east-1:061039798341:stateMachine:ecommerce_jit_workflow"
     key = "training/cloudwatch_metrics.json"
 
     obj = s3.get_object(Bucket=bucket, Key=key)
