@@ -1,6 +1,6 @@
+import os
 import boto3
 import json
-import os
 import base64
 
 
@@ -13,14 +13,12 @@ def lambda_handler(event, context):
     lambda_client = boto3.client("lambda")
     stepfunctions = boto3.client("stepfunctions")
     target_function = os.environ.get("TARGET_FUNCTION", "init_manager")
-    # HARDCODE the State Machine ARN here:
     state_machine_arn = "arn:aws:states:us-east-1:061039798341:stateMachine:ecommerce_jit_workflow"
     key = "training/cloudwatch_metrics.json"
 
     obj = s3.get_object(Bucket=bucket, Key=key)
     training_data = json.loads(obj["Body"].read())
     latest_start = max(d["start"] for d in training_data)
-
     predictor = boto3.client("sagemaker-runtime").invoke_endpoint(
         EndpointName=endpoint_name,
         ContentType="application/json",
@@ -41,33 +39,37 @@ def lambda_handler(event, context):
     forecast = json.loads(predictor["Body"].read())[
         "predictions"][0]["quantiles"]["0.5"]
 
-    def api_gateway_response(payload, status=200):
-        return {
-            "statusCode": status,
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "body": json.dumps(payload)
-        }
+    # Check if called from Step Functions or API Gateway
+    is_apigw = "resource" in event and "httpMethod" in event
+    result = None
 
     if action == "check":
-        if max(forecast) > threshold:
-            print("Surge detected, initiating JIT initialization")
-            stepfunctions.start_execution(
-                stateMachineArn=state_machine_arn,
-                input=json.dumps({"forecast": forecast})
-            )
-            return api_gateway_response({"forecast": forecast, "trigger": True})
-        return api_gateway_response({"forecast": forecast, "trigger": False})
+        result = {"forecast": forecast, "trigger": max(forecast) > threshold}
+        if is_apigw:
+            # For API Gateway, wrap for proxy integration
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps(result)
+            }
+        else:
+            # For Step Functions, return as-is
+            return result
 
     elif action == "init":
-        print("Initializing JIT")
-        client_context = base64.b64encode(
-            json.dumps({"custom": {"COLD_START": "false"}}).encode()
-        ).decode()
+        client_context = base64.b64encode(json.dumps(
+            {"custom": {"COLD_START": "false"}}).encode()).decode()
         lambda_client.invoke(
             FunctionName=target_function,
             InvocationType="Event",
             ClientContext=client_context
         )
-        return api_gateway_response({"status": "initialized"})
+        result = {"status": "initialized"}
+        if is_apigw:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps(result)
+            }
+        else:
+            return result
