@@ -11,7 +11,9 @@ def lambda_handler(event, context):
     threshold = float(os.environ.get("THRESHOLD", 130))
     s3 = boto3.client("s3")
     lambda_client = boto3.client("lambda")
+    stepfunctions = boto3.client("stepfunctions")
     target_function = os.environ.get("TARGET_FUNCTION", "init_manager")
+    state_machine_arn = os.environ.get("SFN_ARN")  # NEW: set in Lambda env
     key = "training/cloudwatch_metrics.json"
 
     # Get latest training data for context
@@ -40,7 +42,7 @@ def lambda_handler(event, context):
     forecast = json.loads(predictor["Body"].read())[
         "predictions"][0]["quantiles"]["0.5"]
 
-    # This function will wrap your response for API Gateway
+    # Wrap for API Gateway
     def api_gateway_response(payload, status=200):
         return {
             "statusCode": status,
@@ -53,8 +55,15 @@ def lambda_handler(event, context):
     if action == "check":
         if max(forecast) > threshold:
             print("Surge detected, initiating JIT initialization")
+            # -- Start Step Function Execution --
+            if state_machine_arn:
+                stepfunctions.start_execution(
+                    stateMachineArn=state_machine_arn,
+                    input=json.dumps({"forecast": forecast})
+                )
             return api_gateway_response({"forecast": forecast, "trigger": True})
         return api_gateway_response({"forecast": forecast, "trigger": False})
+
     elif action == "init":
         print("Initializing JIT")
         client_context = base64.b64encode(

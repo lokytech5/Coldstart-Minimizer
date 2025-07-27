@@ -77,7 +77,8 @@ resource "aws_lambda_function" "init_manager" {
       BUCKET_NAME     = var.bucket_name
       ENDPOINT_NAME   = var.endpoint_name
       THRESHOLD       = tostring(var.threshold)
-      TARGET_FUNCTION = "target_function" # Name of the target function to invoke
+      TARGET_FUNCTION = "target_function"
+      SFN_ARN         = aws_sfn_state_machine.jit_workflow.arn
     }
   }
 }
@@ -236,6 +237,10 @@ resource "aws_api_gateway_deployment" "api_deployment" {
     aws_api_gateway_integration.lambda_post_integration
   ]
   rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+
+  triggers = {
+    redeployment = timestamp()
+  }
 }
 
 resource "aws_api_gateway_stage" "prod" {
