@@ -28,7 +28,7 @@ variable "endpoint_arn" {
 
 variable "threshold" {
   type    = number
-  default = 130
+  default = 300
 }
 
 variable "model_data_url" {
@@ -149,8 +149,12 @@ resource "aws_sfn_state_machine" "jit_workflow" {
         Next       = "Decision"
       },
       Decision = {
-        Type    = "Choice",
-        Choices = [{ "Variable" : "$.Payload.forecast", "NumericGreaterThanEquals" : "${var.threshold}", "Next" : "InitializeJIT" }],
+        Type = "Choice",
+        Choices = [{
+          Variable      = "$.Payload.trigger"
+          BooleanEquals = true
+          Next          = "InitializeJIT"
+        }],
         Default = "NoAction"
       },
       InitializeJIT = {
