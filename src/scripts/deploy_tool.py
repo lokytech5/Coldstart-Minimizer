@@ -1,107 +1,67 @@
 import boto3
 import json
+import time
 from datetime import datetime, timedelta
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
 def prepare_test_data(bucket="sagemaker-us-east-1-061039798341"):
-    """Prepare synthetic test data with a sustained spike for local testing."""
     s3 = boto3.client("s3")
-    # 12 intervals (1 hour, 5-minute steps), with a sustained spike from 25-35 minutes
+    now = datetime.utcnow()
     test_data = [
-        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [100 + i*5]}  # Baseline
-        for i in range(5)  # First 25 minutes
+        {"start": str(now - timedelta(minutes=i*5)), "target": [100 + i*5]}
+        for i in range(5)  # Baseline
     ]
     test_data.extend([
-        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [300]}  # Spike at 300 for 10 minutes
-        for i in range(5, 7)  # 25-35 minutes
+        {"start": str(now - timedelta(minutes=25)), "target": [350]},
+        {"start": str(now - timedelta(minutes=30)), "target": [420]},
+        {"start": str(now - timedelta(minutes=35)), "target": [390]},
     ])
     test_data.extend([
-        {"start": str(datetime.utcnow() - timedelta(minutes=i*5)),
-         "target": [250 - (i-7)*20]}  # Decay
-        for i in range(7, 12)  # 35-60 minutes
+        {"start": str(now - timedelta(minutes=40 + i*5)), "target": [90]}
+        for i in range(3)  # After spike
     ])
-    try:
-        s3.put_object(Bucket=bucket, Key="training/test_data.json",
-                      Body=json.dumps(test_data))
-        logger.info(
-            f"Uploaded spiked test data to s3://{bucket}/training/test_data.json")
-    except Exception as e:
-        logger.error(f"Failed to upload test data: {e}")
-        raise
+    s3.put_object(Bucket=bucket, Key="training/test_data.json",
+                  Body=json.dumps(test_data))
+    logger.info("Uploaded test_data.json with spike.")
 
 
-def invoke_lambda(function_name, payload):
-    """Invoke a Lambda function locally or via AWS for testing."""
-    lambda_client = boto3.client("lambda")
-    try:
-        response = lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType="RequestResponse",
-            Payload=json.dumps(payload)
-        )
-        result = json.load(response["Payload"])
-        logger.info(f"Invoked {function_name}: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Failed to invoke {function_name}: {e}")
-        raise
+def invoke_step_function(state_machine_arn, input_payload=None):
+    sfn = boto3.client("stepfunctions")
+    input_payload = input_payload or {"Input": {"action": "check"}}
+    logger.info("Starting Step Function execution...")
+    response = sfn.start_execution(
+        stateMachineArn=state_machine_arn,
+        input=json.dumps(input_payload)
+    )
+    exec_arn = response["executionArn"]
+    logger.info(f"Execution started: {exec_arn}")
 
-
-def test_workflow():
-    """Test the end-to-end workflow locally with a spike."""
-    bucket = "sagemaker-us-east-1-061039798341"
-    threshold = 130
-
-    # Step 1: Prepare test data with spike
-    prepare_test_data(bucket)
-
-    # Step 2: Simulate data_collector (updates cloudwatch_metrics.json)
-    data_collector_payload = {}
-    data_collector_result = invoke_lambda(
-        "data_collector", data_collector_payload)
-    if data_collector_result.get("status") != "updated":
-        logger.error("data_collector test failed")
-        return False
-
-    # Step 3: Simulate init_manager check
-    init_manager_check_payload = {"Input": {"action": "check"}}
-    init_manager_check_result = invoke_lambda(
-        "init_manager", init_manager_check_payload)
-    forecast = init_manager_check_result.get("forecast", [])
-    trigger = init_manager_check_result.get("trigger", False)
-    if not forecast or (max(forecast) > threshold and not trigger):
-        logger.error("init_manager check test failed")
-        return False
-
-    # Step 4: Simulate init_manager init (if triggered)
-    if trigger:
-        init_manager_init_payload = {"Input": {"action": "init"}}
-        init_manager_init_result = invoke_lambda(
-            "init_manager", init_manager_init_payload)
-        if init_manager_init_result.get("status") != "initialized":
-            logger.error("init_manager init test failed")
-            return False
-
-    logger.info("Workflow test completed successfully")
-    return True
+    # Wait for completion
+    for _ in range(60):
+        desc = sfn.describe_execution(executionArn=exec_arn)
+        status = desc["status"]
+        if status in ["SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"]:
+            break
+        time.sleep(3)
+    desc = sfn.describe_execution(executionArn=exec_arn)
+    logger.info(f"Step Function execution finished: {desc['status']}")
+    logger.info(f"Output: {desc.get('output')}")
+    return desc
 
 
 def main():
-    """Main function to run the testing tool."""
-    logger.info("Starting ColdStart workflow test with spike...")
-    if test_workflow():
-        logger.info("All tests passed. Ready to push to CI/CD pipeline.")
-    else:
-        logger.warning(
-            "Tests failed. Review logs and fix issues before pushing.")
+    bucket = "sagemaker-us-east-1-061039798341"
+    step_function_arn = "arn:aws:states:us-east-1:061039798341:stateMachine:ecommerce_jit_workflow"
+    prepare_test_data(bucket)
+    result = invoke_step_function(step_function_arn)
+    print("\n==== Step Function Output ====\n")
+    print(result.get("output"))
+    print("\n=============================\n")
 
 
 if __name__ == "__main__":
