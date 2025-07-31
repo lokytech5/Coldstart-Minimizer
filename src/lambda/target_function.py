@@ -1,59 +1,54 @@
-import boto3
 import time
-import numpy as np
 import logging
 
+# Set up logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
-s3 = boto3.client("s3")
-bucket = "sagemaker-us-east-1-061039798341"
+
+def cpu_intensive_task(size=80):
+    # Simple matrix multiplication in pure Python
+    a = [[i + j for j in range(size)] for i in range(size)]
+    b = [[i - j for j in range(size)] for i in range(size)]
+    result = [[sum(a[i][k] * b[k][j] for k in range(size))
+               for j in range(size)] for i in range(size)]
+    return result[0][0]
 
 
 def lambda_handler(event, context):
     start_time = time.time()
+
+    # Check if this invocation is a cold start or warm start
     custom = getattr(getattr(context, "client_context", None), "custom", {})
-    is_warm = (
-        "COLD_START" not in custom or custom.get("COLD_START") != "true"
-    )
+    is_warm = ("COLD_START" not in custom or custom.get(
+        "COLD_START") != "true")
 
-    # Simulate e-commerce workload: product lookup with CPU-intensive tasks
-    try:
-        # Mock database query (S3 access)
-        s3_response = s3.list_objects_v2(Bucket=bucket, Prefix="training/")
-        item_count = len(s3_response.get("Contents", [])
-                         ) if "Contents" in s3_response else 0
+    if is_warm:
+        logger.info(
+            "WARM invocation: Prewarmed by JIT workflow (Step Function)")
+    else:
+        logger.info("COLD invocation: Normal Lambda cold start")
 
-        # CPU-intensive task
-        matrix_size = 100
-        a = np.random.rand(matrix_size, matrix_size)
-        b = np.random.rand(matrix_size, matrix_size)
-        _ = np.dot(a, b)
+    # CPU burn for demonstration
+    cpu_intensive_task(size=80)
 
-        # Simulate API response
-        response = {
-            "status": "success",
-            "item_count": item_count,
-            "execution_time_ms": (time.time() - start_time) * 1000,
-            "warm_start": is_warm
-        }
-        logger.info(f"Processed request: {response}")
-        return response
-    except Exception as e:
-        logger.error(f"Error processing request: {e}")
-        return {
-            "status": "error",
-            "execution_time_ms": (time.time() - start_time) * 1000,
-            "warm_start": is_warm
-        }
+    exec_time = (time.time() - start_time) * 1000  # ms
+
+    # Log and return result
+    response = {
+        "status": "success",
+        "execution_time_ms": exec_time,
+        "warm_start": is_warm
+    }
+    logger.info(f"Lambda completed. Warm: {is_warm} | Time: {exec_time:.2f}ms")
+    return response
 
 
 if __name__ == "__main__":
-    # Simulate local execution for testing
     class MockContext:
-        def __init__(self):
+        def __init__(self, warm=False):
             self.client_context = type(
-                'obj', (object,), {"custom": {"COLD_START": "true"}})()
-    event = {}
-    print(lambda_handler(event, MockContext()))
+                'obj', (object,), {"custom": {"COLD_START": "true" if not warm else "false"}})()
+    print(lambda_handler({}, MockContext(warm=True)))
+    print(lambda_handler({}, MockContext(warm=False)))
