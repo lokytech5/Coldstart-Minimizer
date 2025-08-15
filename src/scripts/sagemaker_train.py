@@ -25,43 +25,39 @@ training_image = "522234722520.dkr.ecr.us-east-1.amazonaws.com/forecasting-deepa
 
 
 def convert_csv_to_deepar_json(csv_key, json_key):
-    """Download CSV from S3, convert to DeepAR JSON format, and upload back to S3."""
+    """Download CSV from S3, convert to DeepAR JSON Lines, upload to S3."""
     tmp_csv = "/tmp/train.csv"
     tmp_json = "/tmp/train.json"
 
-    # Download CSV file
     s3.download_file(bucket, csv_key, tmp_csv)
     print(f"Downloaded {csv_key} from S3.")
 
-    # Read CSV and convert
     df = pd.read_csv(tmp_csv)
-    time_col = 'minute'
-    target_col = 'invocation_count'
+    time_col, target_col = "minute", "invocation_count"
 
-    # Check columns exist
     if time_col not in df.columns or target_col not in df.columns:
         raise ValueError(
-            f"CSV must contain '{time_col}' and '{target_col}' columns. Got {list(df.columns)}")
+            f"CSV must contain '{time_col}' and '{target_col}'. "
+            f"Got {list(df.columns)}"
+        )
 
-    # Remove timezone from the start string
-    start_value = df[time_col].iloc[0]
-    if isinstance(start_value, str):
-        start_value = start_value.split("+")[0].split("Z")[0].strip()
-    else:
-        start_value = pd.Timestamp(start_value).tz_localize(
-            None).strftime("%Y-%m-%d %H:%M:%S")
+    # Parse timestamps, sort, enforce 1-minute regularity, integer counts
+    df[time_col] = pd.to_datetime(df[time_col], utc=True, errors="coerce")
+    df = df.dropna(subset=[time_col, target_col]).sort_values(time_col)
+    df = (
+        df.set_index(time_col)
+        # or .mean() if that better matches your metric
+          .resample("1min").sum()
+          .fillna(0)
+    )
+    df[target_col] = df[target_col].astype(int)
 
-    entry = {
-        "start": start_value,
-        "target": df[target_col].tolist()
-    }
+    start_value = df.index[0].tz_convert(None).strftime("%Y-%m-%d %H:%M:%S")
+    entry = {"start": start_value, "target": df[target_col].tolist()}
 
-    # Write JSON Lines to local file
     with open(tmp_json, "w") as f:
         f.write(json.dumps(entry) + "\n")
-    print(f"Converted to DeepAR JSON at {tmp_json}")
 
-    # Upload to S3 in the deepar-json/ folder
     s3.upload_file(tmp_json, bucket, json_key)
     print(f"Uploaded DeepAR JSON to s3://{bucket}/{json_key}")
 
@@ -121,8 +117,9 @@ sagemaker.create_training_job(
     },
     HyperParameters={
         "time_freq": "min",
-        "context_length": "60",
-        "prediction_length": "10",
+        "context_length": "120",
+        "prediction_length": "12",
+        "likelihood": "negative-binomial",
         "num_cells": "50",
         "epochs": "100"
     },
