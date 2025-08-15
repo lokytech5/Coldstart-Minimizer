@@ -28,7 +28,7 @@ variable "endpoint_arn" {
 
 variable "threshold" {
   type    = number
-  default = 70
+  default = 300
 }
 
 variable "model_data_url" {
