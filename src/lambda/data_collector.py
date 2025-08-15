@@ -5,8 +5,10 @@ import logging
 from datetime import datetime, timedelta
 
 # Logging
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "sagemaker-us-east-1-061039798341")
@@ -15,10 +17,9 @@ FUNCTION_NAME = os.environ.get("FUNCTION_NAME", "target_function")
 KEY = os.environ.get("OUTPUT_KEY", "training/cloudwatch_metrics.json")
 TEST_KEY = os.environ.get("TEST_KEY", "training/test_data.json")
 
-PERIOD_SECONDS = int(os.environ.get("PERIOD_SECONDS", "60")
-                     )        # 1-minute points
-LOOKBACK_HOURS = int(os.environ.get("LOOKBACK_HOURS", "24")
-                     )        # how far back to query CW
+# 1-minute points, 24h lookback (override via env if needed)
+PERIOD_SECONDS = int(os.environ.get("PERIOD_SECONDS", "60"))
+LOOKBACK_HOURS = int(os.environ.get("LOOKBACK_HOURS", "24"))
 
 
 def _iso_no_tz(dt: datetime) -> str:
@@ -35,20 +36,24 @@ def lambda_handler(event, context):
         test_obj = s3.get_object(Bucket=BUCKET_NAME, Key=TEST_KEY)
         test_data = json.loads(test_obj["Body"].read())
         logger.info(
-            f"Using test data from s3://{BUCKET_NAME}/{TEST_KEY} ({len(test_data)} points)")
+            "Using test data from s3://%s/%s (%d points)",
+            BUCKET_NAME, TEST_KEY, len(test_data)
+        )
         updated_data = _clean_and_sort(test_data)
         _write_series(s3, updated_data)
         return {"status": "updated (test)", "data_points": len(updated_data)}
     except Exception as e:
         logger.info(
-            f"No test data found at s3://{BUCKET_NAME}/{TEST_KEY} → using CloudWatch. ({e})")
+            "No test data at s3://%s/%s → CloudWatch. (%s)",
+            BUCKET_NAME, TEST_KEY, e
+        )
 
     # --- 2) Fetch existing series (if any) ---
     existing = []
     try:
         obj = s3.get_object(Bucket=BUCKET_NAME, Key=KEY)
         existing = json.loads(obj["Body"].read())
-        logger.info(f"Loaded existing series: {len(existing)} points")
+        logger.info("Loaded existing series: %d points", len(existing))
     except Exception:
         logger.info("No existing series yet; starting fresh.")
 
@@ -63,10 +68,13 @@ def lambda_handler(event, context):
                 "Metric": {
                     "Namespace": "AWS/Lambda",
                     "MetricName": "Invocations",
-                    "Dimensions": [{"Name": "FunctionName", "Value": FUNCTION_NAME}]
+                    "Dimensions": [{
+                        "Name": "FunctionName",
+                        "Value": FUNCTION_NAME
+                    }]
                 },
                 "Period": PERIOD_SECONDS,
-                "Stat": "Sum",
+                "Stat": "Sum"
             }
         }],
         StartTime=start,
@@ -86,7 +94,10 @@ def lambda_handler(event, context):
         if v is not None
     ]
     logger.info(
-        f"Fetched {len(cw_points)} CloudWatch points (period={PERIOD_SECONDS}s)")
+        "Fetched %d CloudWatch points (period=%ss)",
+        len(cw_points),
+        PERIOD_SECONDS
+    )
 
     # --- 4) Merge (existing + new), sort, de-dupe by timestamp ---
     merged = _merge_series(existing, cw_points)
@@ -111,14 +122,21 @@ def _merge_series(existing, new_points):
             by_ts[str(d["start"])] = d
 
     cleaned = [by_ts[k] for k in sorted(by_ts.keys())]
-    logger.info(f"Merged series size: {len(cleaned)}")
+    logger.info("Merged series size: %d", len(cleaned))
     return cleaned
 
 
 def _clean_and_sort(points):
     """Ensure proper schema + sorted ascending by 'start'."""
     def _ok(d):
-        return isinstance(d, dict) and "start" in d and "target" in d and isinstance(d["target"], list) and len(d["target"]) > 0
+        return (
+            isinstance(d, dict) and
+            "start" in d and
+            "target" in d and
+            isinstance(d["target"], list) and
+            len(d["target"]) > 0
+        )
+
     safe = []
     for d in points:
         if _ok(d):
@@ -131,6 +149,6 @@ def _clean_and_sort(points):
     return safe
 
 
-def _write_series(s3, series):
-    s3.put_object(Bucket=BUCKET_NAME, Key=KEY, Body=json.dumps(series))
-    logger.info(f"Wrote {len(series)} points to s3://{BUCKET_NAME}/{KEY}")
+def _write_series(s3_client, series):
+    s3_client.put_object(Bucket=BUCKET_NAME, Key=KEY, Body=json.dumps(series))
+    logger.info("Wrote %d points to s3://%s/%s", len(series), BUCKET_NAME, KEY)

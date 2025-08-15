@@ -1,4 +1,3 @@
-# init_manager.py (replace existing handler with this version)
 import os
 import json
 import base64
@@ -46,16 +45,26 @@ def lambda_handler(event, context):
     series_start = points[0]["start"]
     series_target = [int(d["target"][0]) for d in points if d.get("target")]
 
-    # optional: trim to a recent window to keep payload small (e.g., last 2 days)
-    # series_target = series_target[-(2*24*60):]
+    # optional: trim to a recent window (e.g., last 2 days)
+    # series_target = series_target[-(2 * 24 * 60):]
 
     # forecast p50 & p90
     payload = {
-        "instances": [{"start": series_start, "target": series_target}],
-        "configuration": {"num_samples": 200, "output_types": ["quantiles"], "quantiles": ["0.5", "0.9"]}
+        "instances": [{
+            "start": series_start,
+            "target": series_target
+        }],
+        "configuration": {
+            "num_samples": 200,
+            "output_types": ["quantiles"],
+            "quantiles": ["0.5", "0.9"]
+        }
     }
-    resp = rt.invoke_endpoint(EndpointName=endpoint_name,
-                              ContentType="application/json", Body=json.dumps(payload))
+    resp = rt.invoke_endpoint(
+        EndpointName=endpoint_name,
+        ContentType="application/json",
+        Body=json.dumps(payload)
+    )
     pred = json.loads(resp["Body"].read())["predictions"][0]["quantiles"]
     q50 = [float(x) for x in pred["0.5"]]
     q90 = [float(x) for x in pred["0.9"]]
@@ -66,15 +75,24 @@ def lambda_handler(event, context):
     if mode == "calm":
         will_spike = False
 
-    result = {"forecast": q50, "forecast_p90": q90,
-              "trigger": will_spike, "threshold": threshold, "mode": mode}
+    result = {
+        "forecast": q50,
+        "forecast_p90": q90,
+        "trigger": will_spike,
+        "threshold": threshold,
+        "mode": mode
+    }
 
     # action handling
     if action == "init":
         client_context = base64.b64encode(json.dumps(
-            {"custom": {"COLD_START": "false"}}).encode()).decode()
-        lam.invoke(FunctionName=target_function,
-                   InvocationType="Event", ClientContext=client_context)
+            {"custom": {"COLD_START": "false"}}
+        ).encode()).decode()
+        lam.invoke(
+            FunctionName=target_function,
+            InvocationType="Event",
+            ClientContext=client_context
+        )
         body = {"status": "initialized", "mode": mode}
     else:  # "check"
         body = result
