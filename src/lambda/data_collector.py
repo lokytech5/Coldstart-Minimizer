@@ -15,7 +15,9 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME", "sagemaker-us-east-1-061039798341")
 # the Lambda you're modeling
 FUNCTION_NAME = os.environ.get("FUNCTION_NAME", "target_function")
 KEY = os.environ.get("OUTPUT_KEY", "training/cloudwatch_metrics.json")
-TEST_KEY = os.environ.get("TEST_KEY", "training/test_data.json")
+# change back to train.json after testing
+TEST_KEY = os.environ.get(
+    "TEST_KEY", "training/ecommerce_invocation_counts_demon.json")
 
 # 1-minute points, 24h lookback (override via env if needed)
 PERIOD_SECONDS = int(os.environ.get("PERIOD_SECONDS", "60"))
