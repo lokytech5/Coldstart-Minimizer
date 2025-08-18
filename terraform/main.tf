@@ -28,7 +28,7 @@ variable "endpoint_arn" {
 
 variable "threshold" {
   type    = number
-  default = 300
+  default = 100
 }
 
 variable "model_data_url" {
@@ -36,8 +36,13 @@ variable "model_data_url" {
   type        = string
 }
 
+# NEW: supply the ARN of an existing IAM role that lets EventBridge call states:StartExecution
+variable "events_to_sfn_role_arn" {
+  type        = string
+  description = "Existing IAM role ARN for EventBridge to StartExecution on the state machine"
+}
 
-#Fecthing neccessary role premission from AWS IAM
+# Fetch existing roles (pre-created)
 data "aws_iam_role" "Coldstart_Lambda_Role" {
   name = "ColdStartLambdaRole"
 }
@@ -62,7 +67,7 @@ resource "aws_lambda_function" "target_function" {
   timeout          = 30
 }
 
-#Lamba Function: init_manager
+# Lambda Function: init_manager
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
   role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
@@ -82,27 +87,36 @@ resource "aws_lambda_function" "init_manager" {
   }
 }
 
-#cloudwatch(EventBridge) Rule for init_manager
+############################################
+# Disable direct EventBridge -> Lambda check
+############################################
+
 resource "aws_cloudwatch_event_rule" "every_one_minute" {
+  count               = 0
   name                = "every-one-minute"
   schedule_expression = "rate(1 minute)"
 }
 
 resource "aws_cloudwatch_event_target" "check_cold_start" {
-  rule      = aws_cloudwatch_event_rule.every_one_minute.name
+  count     = 0
+  rule      = aws_cloudwatch_event_rule.every_one_minute[0].name
   target_id = "init_manager"
   arn       = aws_lambda_function.init_manager.arn
 }
 
 resource "aws_lambda_permission" "allow_cloudwatch" {
+  count         = 0
   statement_id  = "AllowExecutionFromCloudWatch"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.init_manager.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.every_one_minute.arn
+  source_arn    = aws_cloudwatch_event_rule.every_one_minute[0].arn
 }
 
-#Lambda Function: data Collector
+#############################
+# Data Collector (keep on)
+#############################
+
 resource "aws_lambda_function" "data_collector" {
   function_name    = "data_collector"
   handler          = "data_collector.lambda_handler"
@@ -133,8 +147,10 @@ resource "aws_lambda_permission" "allow_cloudwatch_data" {
   source_arn    = aws_cloudwatch_event_rule.collect_metrics_target.arn
 }
 
+#########################################
+# Step Functions State Machine
+#########################################
 
-#Step functions State Machine
 resource "aws_sfn_state_machine" "jit_workflow" {
   name     = "ecommerce_jit_workflow"
   role_arn = data.aws_iam_role.Coldstart_StepFunction_Role.arn
@@ -143,30 +159,56 @@ resource "aws_sfn_state_machine" "jit_workflow" {
     StartAt = "CheckForecast",
     States = {
       CheckForecast = {
-        Type       = "Task",
-        Resource   = "arn:aws:states:::lambda:invoke",
-        Parameters = { "Payload" : { "Input" : { "action" : "check" } }, "FunctionName" : aws_lambda_function.init_manager.arn },
-        Next       = "Decision"
+        Type     = "Task",
+        Resource = "arn:aws:states:::lambda:invoke",
+        Parameters = {
+          "Payload" : { "Input" : { "action" : "check" } },
+          "FunctionName" : aws_lambda_function.init_manager.arn
+        },
+        Next = "Decision"
       },
       Decision = {
         Type = "Choice",
         Choices = [{
-          Variable      = "$.Payload.trigger"
-          BooleanEquals = true
+          Variable      = "$.Payload.trigger",
+          BooleanEquals = true,
           Next          = "InitializeJIT"
         }],
         Default = "NoAction"
       },
       InitializeJIT = {
-        Type       = "Task",
-        Resource   = "arn:aws:states:::lambda:invoke",
-        Parameters = { "Payload" : { "Input" : { "action" : "init" } }, "FunctionName" : aws_lambda_function.init_manager.arn },
-        End        = true
+        Type     = "Task",
+        Resource = "arn:aws:states:::lambda:invoke",
+        Parameters = {
+          "Payload" : { "Input" : { "action" : "init" } },
+          "FunctionName" : aws_lambda_function.init_manager.arn
+        },
+        End = true
       },
       NoAction = { Type = "Succeed" }
     }
   })
 }
+
+##############################################
+# EventBridge -> Step Functions schedule
+##############################################
+
+resource "aws_cloudwatch_event_rule" "sfn_every_minute" {
+  name                = "sfn-every-minute"
+  schedule_expression = "rate(1 minute)"
+}
+
+resource "aws_cloudwatch_event_target" "sfn_target" {
+  rule      = aws_cloudwatch_event_rule.sfn_every_minute.name
+  target_id = "start-jit-workflow"
+  arn       = aws_sfn_state_machine.jit_workflow.arn
+  role_arn  = var.events_to_sfn_role_arn
+}
+
+#################################################
+# SageMaker resources
+#################################################
 
 resource "aws_sagemaker_model" "deepar_model" {
   name               = "${var.endpoint_name}-model"
@@ -177,8 +219,6 @@ resource "aws_sagemaker_model" "deepar_model" {
   }
 }
 
-
-# SageMaker Endpoint Configuration
 resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
   name = "${var.endpoint_name}-config"
   production_variants {
@@ -190,7 +230,10 @@ resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
   depends_on = [aws_sagemaker_model.deepar_model]
 }
 
-#Api gateway endpoint here for frontend
+##############################
+# API Gateway for front-end
+##############################
+
 resource "aws_api_gateway_rest_api" "ecommerce_api" {
   name        = "EcommerceJITAPI"
   description = "API for JIT cold start management"
@@ -250,7 +293,6 @@ resource "aws_api_gateway_deployment" "api_deployment" {
     create_before_destroy = true
   }
 }
-
 
 resource "aws_api_gateway_stage" "prod" {
   stage_name    = "prod"
