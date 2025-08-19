@@ -286,7 +286,9 @@ resource "aws_api_gateway_deployment" "api_deployment" {
 
   depends_on = [
     aws_api_gateway_integration.lambda_get_integration,
-    aws_api_gateway_integration.lambda_post_integration
+    aws_api_gateway_integration.lambda_post_integration,
+    aws_api_gateway_integration.options_jit_status_mock,
+    aws_api_gateway_integration_response.options_jit_status_200
   ]
 
   lifecycle {
@@ -306,4 +308,54 @@ resource "aws_lambda_permission" "api_init_manager" {
   function_name = aws_lambda_function.init_manager.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
+}
+
+
+# ===== CORS: OPTIONS /jit-status =====
+resource "aws_api_gateway_method" "options_jit_status" {
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id   = aws_api_gateway_resource.jit_resource.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_jit_status_mock" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id = aws_api_gateway_resource.jit_resource.id
+  http_method = aws_api_gateway_method.options_jit_status.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_jit_status_200" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id = aws_api_gateway_resource.jit_resource.id
+  http_method = aws_api_gateway_method.options_jit_status.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_jit_status_200" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id = aws_api_gateway_resource.jit_resource.id
+  http_method = aws_api_gateway_method.options_jit_status.http_method
+  status_code = aws_api_gateway_method_response.options_jit_status_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+  }
 }

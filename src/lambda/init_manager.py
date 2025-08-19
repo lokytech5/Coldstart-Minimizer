@@ -17,12 +17,39 @@ def _get_mode(event):
 
 
 def lambda_handler(event, context):
+    # defaults from Step Functions-style payload
     action = (event.get("Input", {}) or {}).get("action", "check")
     mode = _get_mode(event)
 
+    # --- Parse API Gateway proxied JSON body for POST /jit-status ---
+    if _is_apigw(event) and event.get("body"):
+        body_str = event["body"]
+        if event.get("isBase64Encoded"):
+            body_str = base64.b64decode(body_str).decode()
+        try:
+            payload = json.loads(body_str)
+            # support {"Input":{"action":"init","mode":"spike"}} or flat {"action":"init"}
+            action = (payload.get("Input") or {}).get(
+                "action", action) or payload.get("action", action)
+            mode = (payload.get("Input") or {}).get(
+                "mode", mode) or payload.get("mode", mode)
+        except Exception:
+            pass
+
+    # Optional: gracefully handle browser preflight if this ever hits Lambda
+    if _is_apigw(event) and event.get("httpMethod") == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            },
+            "body": ""
+        }
+
     endpoint_name = os.environ["ENDPOINT_NAME"]
     bucket = os.environ["BUCKET_NAME"]
-    # set this to your desired per-minute threshold
     threshold = float(os.environ.get("THRESHOLD", 300))
     target_function = os.environ.get("TARGET_FUNCTION", "target_function")
 
@@ -44,9 +71,6 @@ def lambda_handler(event, context):
 
     series_start = points[0]["start"]
     series_target = [int(d["target"][0]) for d in points if d.get("target")]
-
-    # optional: trim to a recent window (e.g., last 2 days)
-    # series_target = series_target[-(2 * 24 * 60):]
 
     # forecast p50 & p90
     payload = {
@@ -70,7 +94,7 @@ def lambda_handler(event, context):
     q90 = [float(x) for x in pred["0.9"]]
 
     will_spike = max(q90) >= threshold
-    if mode == "spike":  # force for demo
+    if mode == "spike":
         will_spike = True
     if mode == "calm":
         will_spike = False
@@ -94,7 +118,7 @@ def lambda_handler(event, context):
             ClientContext=client_context
         )
         body = {"status": "initialized", "mode": mode}
-    else:  # "check"
+    else:
         body = result
 
     # API Gateway proxy response (with CORS)
