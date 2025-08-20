@@ -161,7 +161,7 @@ resource "aws_sfn_state_machine" "jit_workflow" {
   logging_configuration {
     include_execution_data = true
     level                  = "ALL"
-    log_destination        = aws_cloudwatch_log_group.sfn_logs.arn
+    log_destination        = "${aws_cloudwatch_log_group.sfn_logs.arn}:*"
   }
 
   # Calls init_manager synchronously with "check"; if trigger is true, calls it again with "init".
