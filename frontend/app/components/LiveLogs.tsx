@@ -12,30 +12,94 @@ type Props = {
   pollMs?: number;
 };
 
-const GROUPS: { key: "target" | "init" | "collector" | "sfn"; label: string }[] = [
+type GroupKey = "target" | "init" | "collector" | "sfn";
+
+const GROUPS: { key: GroupKey; label: string }[] = [
   { key: "target", label: "target_function" },
   { key: "init", label: "init_manager" },
   { key: "collector", label: "data_collector" },
   { key: "sfn", label: "step_functions" },
 ];
 
-export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
-  const [group, setGroup] = useState<"target" | "init" | "collector" | "sfn">("target");
+const PRESETS = [
+  { label: "All", value: "" },
+  { label: "Errors", value: "ERROR" },
+  { label: "Warm", value: "{ $.WarmStart = 1 }" }, // JSON filter
+  { label: "Cold", value: "{ $.WarmStart = 0 }" },
+  { label: "Reports", value: "REPORT" },
+];
+
+/* ---------------- SFN helpers (label-first rendering) ---------------- */
+
+function parseJSONSafe(s: string): any | null {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+// Label pill text for SFN state
+function sfnStateLabel(obj: any): string {
+  return (
+    obj?.details?.name ??
+    obj?.details?.resource ??
+    obj?.details?.resourceType ??
+    "Step"
+  );
+}
+
+// Short execution id tail for the bracket tag
+function sfnExecTail(obj: any): string | null {
+  const tail = (obj?.execution_arn as string | undefined)?.split(":").pop();
+  return tail ? tail.slice(-8) : null;
+}
+
+// Color for the status/type badge
+function sfnTypeClass(type?: string) {
+  switch (type) {
+    case "ExecutionStarted":
+    case "TaskStarted":
+    case "TaskStateEntered":
+    case "ChoiceStateEntered":
+      return "bg-amber-500/10 text-amber-300 ring-amber-400/20";
+    case "TaskSucceeded":
+    case "TaskStateExited":
+    case "ChoiceStateExited":
+    case "ExecutionSucceeded":
+      return "bg-emerald-500/10 text-emerald-300 ring-emerald-400/20";
+    case "ExecutionFailed":
+    case "TaskFailed":
+      return "bg-rose-500/10 text-rose-300 ring-rose-400/20";
+    default:
+      return "bg-slate-700/40 text-slate-300 ring-slate-600/40";
+  }
+}
+
+// Blue label pill for the state name
+function sfnLabelClass() {
+  return "bg-sky-500/10 text-sky-300 ring-sky-400/20";
+}
+
+export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
+  const [group, setGroup] = useState<GroupKey>("target");
   const [minutes, setMinutes] = useState(15);
-  const [pattern, setPattern] = useState<string>("[WARM-COLD]"); // nice demo default
+  const [pattern, setPattern] = useState<string>("");
   const [items, setItems] = useState<LogsItem[]>([]);
   const [nextToken, setNextToken] = useState<string | undefined>(undefined);
   const [live, setLive] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
-  const seen = useRef<Set<string>>(new Set()); // de-dup across polls
+  const seen = useRef<Set<string>>(new Set());
 
   const clearAll = useCallback(() => {
     setItems([]);
     setNextToken(undefined);
+    setLastUpdated(null);
     seen.current.clear();
   }, []);
 
@@ -45,22 +109,29 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [autoScroll]);
 
-  const merge = useCallback((resp: LogsResponse) => {
-    const fresh: LogsItem[] = [];
-    for (const it of resp.items) {
-      const key = `${it.ts}|${it.stream}|${it.message}`;
-      if (!seen.current.has(key)) {
-        seen.current.add(key);
-        fresh.push(it);
+  const merge = useCallback(
+    (resp: LogsResponse) => {
+      const fresh: LogsItem[] = [];
+      for (const it of resp.items) {
+        const key = `${it.ts}|${it.stream}|${it.message}`;
+        if (!seen.current.has(key)) {
+          seen.current.add(key);
+          fresh.push(it);
+        }
       }
-    }
-    if (fresh.length) {
-      setItems((prev) => [...prev, ...fresh]);
-      // let the browser paint, then scroll
-      setTimeout(scrollToBottom, 0);
-    }
-    setNextToken(resp.next);
-  }, [scrollToBottom]);
+      if (fresh.length) {
+        setItems((prev) => {
+          const merged = [...prev, ...fresh];
+          const last = merged[merged.length - 1];
+          if (last?.ts) setLastUpdated(last.ts);
+          return merged;
+        });
+        setTimeout(scrollToBottom, 0);
+      }
+      setNextToken(resp.next);
+    },
+    [scrollToBottom]
+  );
 
   const load = useCallback(
     async ({ reset = false }: { reset?: boolean } = {}) => {
@@ -77,6 +148,7 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
           next: reset ? undefined : nextToken,
         });
         merge(resp);
+        setLastUpdated((prev) => prev ?? new Date().toISOString());
       } catch (e: any) {
         setError(e?.message ?? "Failed to load logs");
       } finally {
@@ -86,21 +158,18 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
     [base, mock, group, minutes, pattern, nextToken, merge]
   );
 
-  // initial + refetch when group/minutes/pattern change
   useEffect(() => {
     clearAll();
     load({ reset: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, minutes, pattern]);
 
-  // polling
   useEffect(() => {
     if (!live) return;
     const id = setInterval(() => load(), pollMs);
     return () => clearInterval(id);
   }, [live, load, pollMs]);
 
-  // auto-scroll if user is near bottom; stop autoscroll if they scroll up
   const onScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
@@ -108,9 +177,22 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
     setAutoScroll(nearBottom);
   }, []);
 
+  // colorize plain messages (non-SFN)
+  const tint = (m: string) => {
+    if (m.includes("ERROR") || m.includes("TaskFailed")) return "text-rose-300";
+    if (m.startsWith("START")) return "text-emerald-300";
+    if (m.startsWith("END")) return "text-sky-300";
+    if (m.startsWith("REPORT")) return "text-indigo-300";
+    if (m.includes("Execution") || m.includes("TaskState")) return "text-violet-300";
+    return "text-slate-200";
+  };
+
   const headerRight = useMemo(
     () => (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
+        <div className="text-[11px] text-slate-500">
+          {lastUpdated ? <>Updated {new Date(lastUpdated).toLocaleTimeString()}</> : "—"}
+        </div>
         <button
           onClick={() => setLive((v) => !v)}
           className={clsx(
@@ -137,7 +219,7 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
         </button>
       </div>
     ),
-    [live, loading, load]
+    [live, loading, load, lastUpdated]
   );
 
   return (
@@ -152,10 +234,10 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
       </div>
 
       {/* Controls */}
-      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <select
           value={group}
-          onChange={(e) => setGroup(e.target.value as any)}
+          onChange={(e) => setGroup(e.target.value as GroupKey)}
           className="rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-600"
         >
           {GROUPS.map((g) => (
@@ -177,12 +259,33 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
           ))}
         </select>
 
-        <input
-          value={pattern}
-          onChange={(e) => setPattern(e.target.value)}
-          placeholder="CloudWatch filter pattern (ex: [WARM-COLD] or ?WarmStart=1)"
-          className="rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            placeholder="CloudWatch filter pattern (ex: ERROR or { $.WarmStart = 1 })"
+            className="flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+          />
+        </div>
+      </div>
+
+      {/* Quick filter chips */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {PRESETS.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => setPattern(p.value)}
+            className={clsx(
+              "rounded-full px-2.5 py-1 text-xs ring-1 transition",
+              pattern === p.value
+                ? "bg-indigo-600 text-white ring-indigo-500"
+                : "bg-slate-800 text-slate-300 ring-slate-700 hover:bg-slate-700"
+            )}
+            title={`Filter: ${p.value || "none"}`}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       {/* List */}
@@ -196,13 +299,47 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
             No log lines yet.
           </div>
         )}
-        {items.map((it, idx) => (
-          <div key={`${it.ts}-${idx}`} className="whitespace-pre-wrap font-mono text-xs leading-5">
-            <span className="text-slate-500">{new Date(it.ts).toLocaleTimeString()} </span>
-            <span className="text-slate-400">[{it.stream.split("/").at(-1)}]</span>{" "}
-            <span className="text-slate-200">{it.message.trimEnd()}</span>
-          </div>
-        ))}
+
+        {items.map((it, idx) => {
+          const isSFN = group === "sfn";
+          const sfnObj = isSFN ? parseJSONSafe(it.message) : null;
+          const sfnType: string | undefined = sfnObj?.type;
+          const execTail = isSFN ? sfnExecTail(sfnObj) : null;
+          const label = isSFN ? sfnStateLabel(sfnObj) : null;
+
+          return (
+            <div key={`${it.ts}-${idx}`} className="whitespace-pre-wrap font-mono text-xs leading-5">
+              <span className="text-slate-500">{new Date(it.ts).toLocaleTimeString()} </span>
+
+              {/* Bracket tag */}
+              <span className="text-slate-400">
+                {isSFN ? `[SFN${execTail ? `:${execTail}` : ""}]` : `[${it.stream.split("/").at(-1)}]`}
+              </span>{" "}
+
+              {/* Label-first for SFN */}
+              {isSFN && label && (
+                <span className={`ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] ring-1 ${sfnLabelClass()}`}>
+                  {label}
+                </span>
+              )}{" "}
+
+              {/* Status/type badge */}
+              {isSFN && sfnType && (
+                <span
+                  className={`ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] ring-1 ${sfnTypeClass(
+                    sfnType
+                  )}`}
+                >
+                  {sfnType}
+                </span>
+              )}{" "}
+
+              {/* Message */}
+              <span className={tint(it.message)}>{it.message.trimEnd()}</span>
+            </div>
+          );
+        })}
+
         {loading && (
           <div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-400">
             <Spinner size={14} />
@@ -224,7 +361,7 @@ export default function LiveLogs({ base, mock, pollMs = 2000 }: Props) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => load()} // continue with nextToken
+            onClick={() => load()}
             disabled={!nextToken || loading}
             className={clsx(
               "rounded-md px-2 py-1 ring-1",

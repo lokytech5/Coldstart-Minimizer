@@ -52,38 +52,33 @@ export type LogsResponse = { group: string; count: number; items: LogsItem[]; ne
 export async function fetchLogs(opts: {
   base: string;
   mock: boolean;
-  group?: "target" | "init" | "collector" | "sfn";
+  group: "target" | "init" | "collector" | "sfn";
   minutes?: number;
-  pattern?: string;
   limit?: number;
+  pattern?: string;
   next?: string;
 }): Promise<LogsResponse> {
-  const { base, mock, group = "target", minutes = 15, pattern, limit = 100, next } = opts;
-
-  if (mock || !base) {
-    // synthesize a few friendly lines
-    const now = Date.now();
-    const mk = (i: number, warm = true): LogsItem => ({
-      ts: new Date(now - (20 - i) * 1000).toISOString(),
-      stream: "mock/stream",
-      message: warm
-        ? `[WARM-COLD] AM WARM (#${i}) | done in ${(300 + i * 7).toFixed(2)} ms | warm=true`
-        : `[WARM-COLD] AM COLD (#0) | done in ${(430 + i * 9).toFixed(2)} ms | warm=false`,
-    });
-    const items = [mk(0, false), ...Array.from({ length: 12 }, (_, i) => mk(i + 1, true))];
-    return { group: `/mock/${group}`, count: items.length, items };
+  if (opts.mock || !opts.base) {
+    // return a harmless empty shape for dev/mock
+    return { group: opts.group, count: 0, items: [] };
   }
 
   const params = new URLSearchParams({
-    group,
-    minutes: String(minutes),
-    limit: String(limit),
+    group: opts.group,
+    minutes: String(opts.minutes ?? 15),
+    limit: String(opts.limit ?? 100),
   });
-  if (pattern) params.set("pattern", pattern);
-  if (next) params.set("next", next);
 
-  const res = await fetch(`${base}/logs?${params.toString()}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`GET /logs failed (${res.status})`);
+  if (opts.pattern && opts.pattern.trim()) {
+    // DO NOT wrap in quotes; let CloudWatch parse the syntax
+    params.set("pattern", opts.pattern.trim());
+  }
+  if (opts.next) params.set("next", opts.next);
+
+  const res = await fetch(`${opts.base}/logs?${params.toString()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+
 

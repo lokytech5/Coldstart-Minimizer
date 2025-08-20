@@ -149,66 +149,70 @@ export default function JITDashboard() {
         </div>
       </section>
 
-     {/* Content grid */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Chart */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm lg:col-span-2">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-400">
-              <BarChart3 className="h-4 w-4" />
-              <span className="text-sm font-medium text-slate-200">Forecast (next 10 mins)</span>
-            </div>
-            {!hasStarted && (
-              <span className="text-xs text-slate-500">No data yet — click “Initialize JIT now”.</span>
-            )}
-          </div>
-          <ForecastChart
-            forecast={status?.forecast ?? []}
-            p90={status?.forecast_p90 ?? []}
-            threshold={status?.threshold ?? 0}
-            loading={loading && !status}
-          />
+    {/* Content grid */}
+<section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+  {/* Left column: chart + logs stacked */}
+  <div className="lg:col-span-2 flex flex-col gap-6">
+    {/* Forecast card */}
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-slate-400">
+          <BarChart3 className="h-4 w-4" />
+          <span className="text-sm font-medium text-slate-200">Forecast (next 10 mins)</span>
         </div>
+        {!hasStarted && (
+          <span className="text-xs text-slate-500">No data yet — click “Initialize JIT now”.</span>
+        )}
+      </div>
 
-        {/* Raw + How-to */}
-        <div className="flex flex-col gap-4">
+      <ForecastChart
+        forecast={status?.forecast ?? []}
+        p90={status?.forecast_p90 ?? []}
+        threshold={status?.threshold ?? 0}
+        loading={loading && !status}
+      />
+    </div>
 
-           {/* NEW: Live logs */}
-   <LiveLogs base={API_BASE} mock={mockMode} />
-
-  {/* Raw response */}
-  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
-    <div className="mb-2 text-sm font-medium text-slate-200">Raw response</div>
-    <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-200 ring-1 ring-slate-800">
-{JSON.stringify(status ?? { message: "No data yet" }, null, 2)}
-    </pre>
+    {/* Live logs card (its own card; do not nest inside the chart card) */}
+    <LiveLogs base={API_BASE} mock={mockMode} />
   </div>
 
-  {/* Manual init */}
-  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
-    <div className="mb-2 text-sm font-medium text-slate-200">Manual init call</div>
-    <p className="mb-2 text-xs text-slate-400">
-      We send a POST to <span className="font-mono">{API_BASE ? `${API_BASE}/jit-status` : "/jit-status"}</span> with:
-    </p>
-    <code className="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200 ring-1 ring-slate-700">
-      {'{"Input":{"action":"init"}}'}
-    </code>
-    <div className="mt-3">
-      <button
-        onClick={onInit}
-        disabled={initLoading}
-        className={clsx(
-          "inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500",
-          initLoading && "opacity-60"
-        )}
-      >
-        <Power className="h-4 w-4" />
-        Send init payload
-      </button>
+  {/* Right column: raw + manual init */}
+  <div className="flex flex-col gap-4">
+    {/* Raw response */}
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+      <div className="mb-2 text-sm font-medium text-slate-200">Raw response</div>
+      <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-200 ring-1 ring-slate-800">
+{JSON.stringify(status ?? { message: "No data yet" }, null, 2)}
+      </pre>
+    </div>
+
+    {/* Manual init */}
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+      <div className="mb-2 text-sm font-medium text-slate-200">Manual init call</div>
+      <p className="mb-2 text-xs text-slate-400">
+        We send a POST to <span className="font-mono">{API_BASE ? `${API_BASE}/jit-status` : "/jit-status"}</span> with:
+      </p>
+      <code className="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200 ring-1 ring-slate-700">
+        {'{"Input":{"action":"init"}}'}
+      </code>
+      <div className="mt-3">
+        <button
+          onClick={onInit}
+          disabled={initLoading}
+          className={clsx(
+            "inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500",
+            initLoading && "opacity-60"
+          )}
+        >
+          <Power className="h-4 w-4" />
+          Send init payload
+        </button>
+      </div>
     </div>
   </div>
-</div>
-      </section>
+</section>
+
 
       {/* Footer */}
       <footer className="mt-10 text-center text-xs text-slate-500">
