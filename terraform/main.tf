@@ -188,7 +188,7 @@ resource "aws_sfn_state_machine" "jit_workflow" {
 resource "aws_cloudwatch_event_rule" "sfn_every_five" {
   count               = var.enable_sfn_schedule ? 1 : 0
   name                = "sfn-every-five-minutes"
-  schedule_expression = "rate(1 minutes)"
+  schedule_expression = "rate(5 minutes)"
   state               = "DISABLED"
 }
 
