@@ -11,6 +11,9 @@ terraform {
   }
 }
 
+# =========================
+# Variables
+# =========================
 variable "bucket_name" {
   type    = string
   default = "sagemaker-us-east-1-061039798341"
@@ -36,13 +39,21 @@ variable "model_data_url" {
   type        = string
 }
 
-# NEW: supply the ARN of an existing IAM role that lets EventBridge call states:StartExecution
+# Existing IAM role that lets EventBridge call Step Functions
 variable "events_to_sfn_role_arn" {
   type        = string
   description = "Existing IAM role ARN for EventBridge to StartExecution on the state machine"
 }
 
-# Fetch existing roles (pre-created)
+# Toggle the EventBridge -> Step Functions schedule
+variable "enable_sfn_schedule" {
+  type    = bool
+  default = false
+}
+
+# =========================
+# Pre-created IAM roles
+# =========================
 data "aws_iam_role" "Coldstart_Lambda_Role" {
   name = "ColdStartLambdaRole"
 }
@@ -55,7 +66,9 @@ data "aws_iam_role" "Coldstart_StepFunction_Role" {
   name = "ColdStartStepFunctionRole"
 }
 
-# Target Function
+# =========================
+# Lambda: Target function
+# =========================
 resource "aws_lambda_function" "target_function" {
   function_name    = "target_function"
   role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
@@ -67,74 +80,53 @@ resource "aws_lambda_function" "target_function" {
   timeout          = 30
 }
 
-# Lambda Function: init_manager
+# =========================
+# Lambda: init_manager (API)
+# =========================
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
   role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   handler          = "init_manager.lambda_handler"
   runtime          = "python3.13"
   architectures    = ["x86_64"]
-  source_code_hash = filebase64sha256("${path.module}/../src/lambda/init_manager.zip")
   filename         = "${path.module}/../src/lambda/init_manager.zip"
+  source_code_hash = filebase64sha256("${path.module}/../src/lambda/init_manager.zip")
   timeout          = 30
+
+  # IMPORTANT: Use SFN_NAME (static) to avoid TF dependency cycles.
   environment {
     variables = {
       BUCKET_NAME     = var.bucket_name
       ENDPOINT_NAME   = var.endpoint_name
       THRESHOLD       = tostring(var.threshold)
       TARGET_FUNCTION = "target_function"
+      SFN_NAME        = "ecommerce_jit_workflow"
     }
   }
 }
 
-############################################
-# Disable direct EventBridge -> Lambda check
-############################################
-
-resource "aws_cloudwatch_event_rule" "every_one_minute" {
-  count               = 0
-  name                = "every-one-minute"
-  schedule_expression = "rate(1 minute)"
-}
-
-resource "aws_cloudwatch_event_target" "check_cold_start" {
-  count     = 0
-  rule      = aws_cloudwatch_event_rule.every_one_minute[0].name
-  target_id = "init_manager"
-  arn       = aws_lambda_function.init_manager.arn
-}
-
-resource "aws_lambda_permission" "allow_cloudwatch" {
-  count         = 0
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.init_manager.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.every_one_minute[0].arn
-}
-
-#############################
-# Data Collector (keep on)
-#############################
-
+# =========================
+# Lambda: data_collector
+# =========================
 resource "aws_lambda_function" "data_collector" {
   function_name    = "data_collector"
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   handler          = "data_collector.lambda_handler"
   runtime          = "python3.13"
-  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
   filename         = "${path.module}/../src/lambda/data_collector.zip"
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/data_collector.zip")
   timeout          = 30
 }
 
-resource "aws_cloudwatch_event_rule" "collect_metrics_target" {
+# CloudWatch schedule for data_collector
+resource "aws_cloudwatch_event_rule" "collect_metrics_rule" {
   name                = "collect_metrics"
   schedule_expression = "rate(5 minutes)"
   depends_on          = [aws_lambda_function.data_collector]
 }
 
 resource "aws_cloudwatch_event_target" "collect_metrics_target" {
-  rule      = aws_cloudwatch_event_rule.collect_metrics_target.name
+  rule      = aws_cloudwatch_event_rule.collect_metrics_rule.name
   target_id = "data_collector"
   arn       = aws_lambda_function.data_collector.arn
 }
@@ -144,16 +136,17 @@ resource "aws_lambda_permission" "allow_cloudwatch_data" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.data_collector.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.collect_metrics_target.arn
+  source_arn    = aws_cloudwatch_event_rule.collect_metrics_rule.arn
 }
 
-#########################################
+# =========================
 # Step Functions State Machine
-#########################################
-
+# =========================
 resource "aws_sfn_state_machine" "jit_workflow" {
   name     = "ecommerce_jit_workflow"
   role_arn = data.aws_iam_role.Coldstart_StepFunction_Role.arn
+
+  # Calls init_manager synchronously with "check"; if trigger is true, calls it again with "init".
   definition = jsonencode({
     Comment = "Workflow to handle JIT Lambda initialization",
     StartAt = "CheckForecast",
@@ -190,26 +183,24 @@ resource "aws_sfn_state_machine" "jit_workflow" {
   })
 }
 
-##############################################
-# EventBridge -> Step Functions schedule
-##############################################
-
+# Optional: EventBridge schedule -> Step Functions (toggleable)
 resource "aws_cloudwatch_event_rule" "sfn_every_minute" {
+  count               = var.enable_sfn_schedule ? 1 : 0
   name                = "sfn-every-minute"
   schedule_expression = "rate(1 minute)"
 }
 
 resource "aws_cloudwatch_event_target" "sfn_target" {
-  rule      = aws_cloudwatch_event_rule.sfn_every_minute.name
+  count     = var.enable_sfn_schedule ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.sfn_every_minute[0].name
   target_id = "start-jit-workflow"
   arn       = aws_sfn_state_machine.jit_workflow.arn
   role_arn  = var.events_to_sfn_role_arn
 }
 
-#################################################
+# =========================
 # SageMaker resources
-#################################################
-
+# =========================
 resource "aws_sagemaker_model" "deepar_model" {
   name               = "${var.endpoint_name}-model"
   execution_role_arn = data.aws_iam_role.Coldstart_Sagemaker_Role.arn
@@ -230,10 +221,9 @@ resource "aws_sagemaker_endpoint_configuration" "deepar_endpoint_config" {
   depends_on = [aws_sagemaker_model.deepar_model]
 }
 
-##############################
+# =========================
 # API Gateway for front-end
-##############################
-
+# =========================
 resource "aws_api_gateway_rest_api" "ecommerce_api" {
   name        = "EcommerceJITAPI"
   description = "API for JIT cold start management"
@@ -277,41 +267,7 @@ resource "aws_api_gateway_integration" "lambda_post_integration" {
   uri                     = aws_lambda_function.init_manager.invoke_arn
 }
 
-resource "aws_api_gateway_deployment" "api_deployment" {
-  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
-
-  triggers = {
-    redeployment = timestamp()
-  }
-
-  depends_on = [
-    aws_api_gateway_integration.lambda_get_integration,
-    aws_api_gateway_integration.lambda_post_integration,
-    aws_api_gateway_integration.options_jit_status_mock,
-    aws_api_gateway_integration_response.options_jit_status_200
-  ]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_api_gateway_stage" "prod" {
-  stage_name    = "prod"
-  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
-  deployment_id = aws_api_gateway_deployment.api_deployment.id
-}
-
-resource "aws_lambda_permission" "api_init_manager" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.init_manager.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
-}
-
-
-# ===== CORS: OPTIONS /jit-status =====
+# ---- CORS (OPTIONS) ----
 resource "aws_api_gateway_method" "options_jit_status" {
   rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
   resource_id   = aws_api_gateway_resource.jit_resource.id
@@ -358,4 +314,38 @@ resource "aws_api_gateway_integration_response" "options_jit_status_200" {
     "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
   }
+}
+
+# ---- Deployment & Stage ----
+resource "aws_api_gateway_deployment" "api_deployment" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+
+  triggers = {
+    redeployment = timestamp()
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.lambda_get_integration,
+    aws_api_gateway_integration.lambda_post_integration,
+    aws_api_gateway_integration.options_jit_status_mock,
+    aws_api_gateway_integration_response.options_jit_status_200
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_stage" "prod" {
+  stage_name    = "prod"
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  deployment_id = aws_api_gateway_deployment.api_deployment.id
+}
+
+resource "aws_lambda_permission" "api_init_manager" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.init_manager.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
 }

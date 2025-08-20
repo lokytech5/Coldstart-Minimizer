@@ -1,18 +1,20 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BarChart3, Flame, Gauge, LineChart, Power, RefreshCw, Rocket, ShieldCheck } from "lucide-react";
 import { fetchStatus, triggerInit, type JitStatus } from "../app/lib/api";
 import ForecastChart from "../app/components/ForecastChart";
 import StatusPill from "../app/components/StatusPill";
 import clsx from "clsx";
+import Spinner from "./components/Spinner";
 
 export default function JITDashboard() {
   const [status, setStatus] = useState<JitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [initLoading, setInitLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mockMode, setMockMode] = useState<boolean>(() => !process.env.NEXT_PUBLIC_JIT_API_BASE);
+  const [hasStarted, setHasStarted] = useState(false);
 
+  const [mockMode, setMockMode] = useState<boolean>(() => !process.env.NEXT_PUBLIC_JIT_API_BASE);
   const API_BASE = process.env.NEXT_PUBLIC_JIT_API_BASE ?? "";
 
   const lastForecast = useMemo(() => status?.forecast?.at(-1) ?? null, [status]);
@@ -36,6 +38,7 @@ export default function JITDashboard() {
     setError(null);
     try {
       await triggerInit({ mock: mockMode, base: API_BASE });
+      setHasStarted(true);
       await load();
     } catch (e: any) {
       setError(e?.message ?? "Init failed");
@@ -43,13 +46,6 @@ export default function JITDashboard() {
       setInitLoading(false);
     }
   };
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 30_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockMode, API_BASE]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
@@ -95,8 +91,8 @@ export default function JITDashboard() {
               initLoading && "opacity-60"
             )}
           >
-            <Rocket className={clsx("h-4 w-4", initLoading && "animate-bounce")} />
-            Initialize JIT now
+           {initLoading ? <Spinner size={16} /> : <Rocket className="h-4 w-4" />}
+            {initLoading ? "Initializing…" : "Initialize JIT now"}
           </button>
         </div>
       </div>
@@ -152,7 +148,7 @@ export default function JITDashboard() {
         </div>
       </section>
 
-      {/* Content grid */}
+     {/* Content grid */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Chart */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm lg:col-span-2">
@@ -161,6 +157,9 @@ export default function JITDashboard() {
               <BarChart3 className="h-4 w-4" />
               <span className="text-sm font-medium text-slate-200">Forecast (next 10 mins)</span>
             </div>
+            {!hasStarted && (
+              <span className="text-xs text-slate-500">No data yet — click “Initialize JIT now”.</span>
+            )}
           </div>
           <ForecastChart
             forecast={status?.forecast ?? []}
@@ -208,6 +207,16 @@ export default function JITDashboard() {
       <footer className="mt-10 text-center text-xs text-slate-500">
         Built for the cold-start demo · {mockMode ? "Mock mode" : "Live mode"}
       </footer>
+
+      {/* OPTIONAL: soft overlay while initializing */}
+      {/* {initLoading && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 backdrop-blur-sm">
+          <div className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 ring-1 ring-slate-700">
+            <Spinner size={22} />
+            <span className="text-sm text-slate-200">Initializing JIT…</span>
+          </div>
+        </div>
+      )} */}
     </main>
   );
 }

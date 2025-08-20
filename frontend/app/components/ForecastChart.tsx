@@ -11,6 +11,7 @@ import {
   Tooltip,
   ReferenceLine,
 } from "recharts";
+import Spinner from "./Spinner";
 
 type Props = {
   forecast: number[];
@@ -19,7 +20,6 @@ type Props = {
   loading?: boolean;
 };
 
-// Recharts typing shim for TS false-positives
 const XAxisC = XAxis as unknown as ComponentType<any>;
 const YAxisC = YAxis as unknown as ComponentType<any>;
 const ReferenceLineC = ReferenceLine as unknown as ComponentType<any>;
@@ -32,6 +32,22 @@ export default function ForecastChart({ forecast, p90, threshold, loading }: Pro
       p90: Math.round((p90?.[i] ?? v) * 100) / 100,
     })) ?? [];
 
+  // Empty state w/ loading spinner
+  if (!data.length) {
+    return (
+      <div className="h-72 w-full grid place-items-center rounded-xl border border-dashed border-slate-800 text-slate-500">
+        {loading ? (
+          <div className="flex items-center gap-2 text-slate-300">
+            <Spinner />
+            <span>Loading forecast…</span>
+          </div>
+        ) : (
+          "No forecast yet — click “Initialize JIT now”."
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -40,21 +56,22 @@ export default function ForecastChart({ forecast, p90, threshold, loading }: Pro
           <XAxisC dataKey="t" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={{ stroke: "#475569" }} tickLine={{ stroke: "#475569" }} />
           <YAxisC allowDecimals tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={{ stroke: "#475569" }} tickLine={{ stroke: "#475569" }} />
           <Tooltip
-            contentStyle={{
-              background: "rgb(2 6 23)",        // slate-950
-              border: "1px solid rgb(51 65 85)", // slate-700
-              borderRadius: 12,
-              color: "rgb(226 232 240)",         // slate-200
-            }}
-            labelStyle={{ color: "rgb(148 163 184)" }} // slate-400
+            contentStyle={{ background: "rgb(2 6 23)", border: "1px solid rgb(51 65 85)", borderRadius: 12, color: "rgb(226 232 240)" }}
+            labelStyle={{ color: "rgb(148 163 184)" }}
             itemStyle={{ color: "rgb(226 232 240)" }}
           />
-          <ReferenceLineC y={threshold} stroke="#f87171" strokeDasharray="4 4" />{/* rose-400 */}
-          <Line type="monotone" dataKey="forecast" stroke="#60a5fa" dot={false} strokeWidth={2} /> {/* blue-400 */}
-          <Line type="monotone" dataKey="p90" stroke="#c084fc" dot={false} strokeWidth={2} />     {/* violet-400 */}
+          <ReferenceLineC y={threshold} stroke="#f87171" strokeDasharray="4 4" />
+          <Line type="monotone" dataKey="forecast" stroke="#60a5fa" dot={false} strokeWidth={2} />
+          <Line type="monotone" dataKey="p90" stroke="#c084fc" dot={false} strokeWidth={2} />
         </RLineChart>
       </ResponsiveContainer>
-      {loading && <div className="mt-2 text-center text-xs text-slate-400">Loading…</div>}
+
+      {loading && (
+        <div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-400">
+          <Spinner size={14} />
+          <span>Loading…</span>
+        </div>
+      )}
     </div>
   );
 }

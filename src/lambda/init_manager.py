@@ -10,25 +10,43 @@ def _is_apigw(event):
 
 
 def _get_mode(event):
-    # priority: Input.mode (StepFn or POST body) > queryStringParameters.mode
+    # priority: Input.mode > queryStringParameters.mode
     mode = (event.get("Input", {}) or {}).get("mode")
     qsp = event.get("queryStringParameters") or {}
     return (mode or qsp.get("mode") or "auto").lower()
 
 
+def _get_sfn_arn():
+    """
+    Resolve the Step Functions state machine ARN at runtime.
+    - Prefer env SFN_ARN if provided.
+    - Otherwise build from AWS_REGION + Account ID + SFN_NAME (default: ecommerce_jit_workflow).
+    """
+    arn = os.environ.get("SFN_ARN")
+    if arn:
+        return arn
+    name = os.environ.get("SFN_NAME", "ecommerce_jit_workflow")
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    try:
+        account = boto3.client("sts").get_caller_identity()["Account"]
+    except Exception:
+        # Last-ditch: let it be None so caller can skip starting SFN if we can't resolve
+        return None
+    return f"arn:aws:states:{region}:{account}:stateMachine:{name}"
+
+
 def lambda_handler(event, context):
-    # defaults from Step Functions-style payload
+    # ---- Inputs / mode -------------------------------------------------------
     action = (event.get("Input", {}) or {}).get("action", "check")
     mode = _get_mode(event)
 
-    # --- Parse API Gateway proxied JSON body for POST /jit-status ---
+    # Parse API Gateway proxied POST body (JSON)
     if _is_apigw(event) and event.get("body"):
         body_str = event["body"]
         if event.get("isBase64Encoded"):
             body_str = base64.b64decode(body_str).decode()
         try:
             payload = json.loads(body_str)
-            # support {"Input":{"action":"init","mode":"spike"}} or flat {"action":"init"}
             action = (payload.get("Input") or {}).get(
                 "action", action) or payload.get("action", action)
             mode = (payload.get("Input") or {}).get(
@@ -36,7 +54,7 @@ def lambda_handler(event, context):
         except Exception:
             pass
 
-    # Optional: gracefully handle browser preflight if this ever hits Lambda
+    # Handle CORS preflight if OPTIONS ever hits Lambda
     if _is_apigw(event) and event.get("httpMethod") == "OPTIONS":
         return {
             "statusCode": 200,
@@ -48,6 +66,7 @@ def lambda_handler(event, context):
             "body": ""
         }
 
+    # ---- Env / clients -------------------------------------------------------
     endpoint_name = os.environ["ENDPOINT_NAME"]
     bucket = os.environ["BUCKET_NAME"]
     threshold = float(os.environ.get("THRESHOLD", 300))
@@ -57,14 +76,30 @@ def lambda_handler(event, context):
     lam = boto3.client("lambda")
     rt = boto3.client("sagemaker-runtime")
 
-    # choose data source (demo vs live)
+    # ---- DEMO-GATE: If API Gateway POST called us, trigger SFN FIRST ----------
+    if _is_apigw(event) and event.get("httpMethod") == "POST":
+        sfn_arn = _get_sfn_arn()
+        if sfn_arn:
+            try:
+                sfn = boto3.client("stepfunctions")
+                sfn.start_execution(
+                    stateMachineArn=sfn_arn,
+                    input=json.dumps({"Input": {"action": "check"}})
+                )
+                print(f"[demo] Started Step Function first: {sfn_arn}")
+            except Exception as e:
+                print(f"[warn] SFN start failed: {e}")
+        else:
+            print("[warn] No SFN ARN could be resolved; skipping SFN start")
+
+    # ---- Data source selection -----------------------------------------------
     key = "training/cloudwatch_metrics.json"
     if mode == "spike":
         key = "training/demo_spike.json"
     elif mode == "calm":
         key = "training/demo_calm.json"
 
-    # load & shape full series
+    # ---- Load & shape series --------------------------------------------------
     obj = s3.get_object(Bucket=bucket, Key=key)
     points = json.loads(obj["Body"].read())
     points.sort(key=lambda d: dateutil.parser.parse(d["start"]))
@@ -72,7 +107,7 @@ def lambda_handler(event, context):
     series_start = points[0]["start"]
     series_target = [int(d["target"][0]) for d in points if d.get("target")]
 
-    # forecast p50 & p90
+    # ---- Forecast (p50 & p90) -------------------------------------------------
     payload = {
         "instances": [{
             "start": series_start,
@@ -94,7 +129,7 @@ def lambda_handler(event, context):
     q90 = [float(x) for x in pred["0.9"]]
 
     will_spike = max(q90) >= threshold
-    if mode == "spike":
+    if mode == "spike":  # force for demo
         will_spike = True
     if mode == "calm":
         will_spike = False
@@ -107,7 +142,7 @@ def lambda_handler(event, context):
         "mode": mode
     }
 
-    # action handling
+    # ---- Action handling ------------------------------------------------------
     if action == "init":
         client_context = base64.b64encode(json.dumps(
             {"custom": {"COLD_START": "false"}}
@@ -118,10 +153,10 @@ def lambda_handler(event, context):
             ClientContext=client_context
         )
         body = {"status": "initialized", "mode": mode}
-    else:
+    else:  # "check"
         body = result
 
-    # API Gateway proxy response (with CORS)
+    # ---- API Gateway proxy response (with CORS) -------------------------------
     if _is_apigw(event):
         return {
             "statusCode": 200,
@@ -133,4 +168,6 @@ def lambda_handler(event, context):
             },
             "body": json.dumps(body)
         }
+
+    # Non-APIGW invocations (Step Functions / EventBridge)
     return body
