@@ -1,3 +1,9 @@
+data "aws_caller_identity" "current" {}
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+  region     = "us-east-1"
+}
+
 provider "aws" {
   region = "us-east-1"
 }
@@ -140,12 +146,23 @@ resource "aws_lambda_permission" "allow_cloudwatch_data" {
   source_arn    = aws_cloudwatch_event_rule.collect_metrics_rule.arn
 }
 
+resource "aws_cloudwatch_log_group" "sfn_logs" {
+  name              = "/aws/states/ecommerce_jit_workflow"
+  retention_in_days = 7
+}
+
 # =========================
 # Step Functions State Machine
 # =========================
 resource "aws_sfn_state_machine" "jit_workflow" {
   name     = "ecommerce_jit_workflow"
   role_arn = data.aws_iam_role.Coldstart_StepFunction_Role.arn
+
+  logging_configuration {
+    include_execution_data = true
+    level                  = "ALL"
+    log_destination        = aws_cloudwatch_log_group.sfn_logs.arn
+  }
 
   # Calls init_manager synchronously with "check"; if trigger is true, calls it again with "init".
   definition = jsonencode({
@@ -317,27 +334,6 @@ resource "aws_api_gateway_integration_response" "options_jit_status_200" {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
   }
 }
-
-# ---- Deployment & Stage ----
-resource "aws_api_gateway_deployment" "api_deployment" {
-  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
-
-  triggers = {
-    redeployment = timestamp()
-  }
-
-  depends_on = [
-    aws_api_gateway_integration.lambda_get_integration,
-    aws_api_gateway_integration.lambda_post_integration,
-    aws_api_gateway_integration.options_jit_status_mock,
-    aws_api_gateway_integration_response.options_jit_status_200
-  ]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 resource "aws_api_gateway_stage" "prod" {
   stage_name    = "prod"
   rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
@@ -351,3 +347,131 @@ resource "aws_lambda_permission" "api_init_manager" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
 }
+
+# =========================
+# logging Infrastructure
+# =========================
+
+
+# =========================
+# Logs proxy Lambda
+# =========================
+resource "aws_lambda_function" "logs_proxy" {
+  function_name    = "logs_proxy"
+  role             = data.aws_iam_role.Coldstart_Lambda_Role.arn
+  handler          = "logs_proxy.lambda_handler"
+  runtime          = "python3.13"
+  filename         = "${path.module}/../src/lambda/logs_proxy.zip"
+  source_code_hash = filebase64sha256("${path.module}/../src/lambda/logs_proxy.zip")
+  timeout          = 10
+  memory_size      = 256
+
+  environment {
+    variables = {
+      LOG_GROUP_TARGET    = "/aws/lambda/${aws_lambda_function.target_function.function_name}"
+      LOG_GROUP_INIT      = "/aws/lambda/${aws_lambda_function.init_manager.function_name}"
+      LOG_GROUP_COLLECTOR = "/aws/lambda/${aws_lambda_function.data_collector.function_name}"
+      LOG_GROUP_SFN       = aws_cloudwatch_log_group.sfn_logs.name
+    }
+  }
+}
+
+# =========================
+# API Gateway: Logs Proxy
+# =========================
+
+# /logs
+resource "aws_api_gateway_resource" "logs_resource" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  parent_id   = aws_api_gateway_rest_api.ecommerce_api.root_resource_id
+  path_part   = "logs"
+}
+
+resource "aws_api_gateway_method" "get_logs" {
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id   = aws_api_gateway_resource.logs_resource.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_get_logs" {
+  rest_api_id             = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id             = aws_api_gateway_resource.logs_resource.id
+  http_method             = aws_api_gateway_method.get_logs.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.logs_proxy.invoke_arn
+}
+
+# CORS OPTIONS for /logs
+resource "aws_api_gateway_method" "options_logs" {
+  rest_api_id   = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id   = aws_api_gateway_resource.logs_resource.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_logs_mock" {
+  rest_api_id       = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id       = aws_api_gateway_resource.logs_resource.id
+  http_method       = aws_api_gateway_method.options_logs.http_method
+  type              = "MOCK"
+  request_templates = { "application/json" = "{ \"statusCode\": 200 }" }
+}
+
+resource "aws_api_gateway_method_response" "options_logs_200" {
+  rest_api_id     = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id     = aws_api_gateway_resource.logs_resource.id
+  http_method     = aws_api_gateway_method.options_logs.http_method
+  status_code     = "200"
+  response_models = { "application/json" = "Empty" }
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_logs_200" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+  resource_id = aws_api_gateway_resource.logs_resource.id
+  http_method = aws_api_gateway_method.options_logs.http_method
+  status_code = aws_api_gateway_method_response.options_logs_200.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+  }
+}
+
+# Allow API Gateway to call logs_proxy
+resource "aws_lambda_permission" "api_logs_proxy" {
+  statement_id  = "AllowAPIGatewayInvokeLogs"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.logs_proxy.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.ecommerce_api.execution_arn}/*/*"
+}
+
+resource "aws_api_gateway_deployment" "api_deployment" {
+  rest_api_id = aws_api_gateway_rest_api.ecommerce_api.id
+
+  # force redeploys
+  triggers = { redeployment = timestamp() }
+
+  depends_on = [
+    # /jit-status GET/POST + OPTIONS
+    aws_api_gateway_integration.lambda_get_integration,
+    aws_api_gateway_integration.lambda_post_integration,
+    aws_api_gateway_integration.options_jit_status_mock,
+    aws_api_gateway_integration_response.options_jit_status_200,
+
+    # /logs GET + OPTIONS
+    aws_api_gateway_integration.lambda_get_logs,
+    aws_api_gateway_integration.options_logs_mock,
+    aws_api_gateway_integration_response.options_logs_200
+  ]
+
+  lifecycle { create_before_destroy = true }
+}
+
