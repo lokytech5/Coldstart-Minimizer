@@ -48,7 +48,7 @@ variable "events_to_sfn_role_arn" {
 # Toggle the EventBridge -> Step Functions schedule
 variable "enable_sfn_schedule" {
   type    = bool
-  default = false
+  default = true
 }
 
 # =========================
@@ -101,6 +101,7 @@ resource "aws_lambda_function" "init_manager" {
       THRESHOLD       = tostring(var.threshold)
       TARGET_FUNCTION = "target_function"
       SFN_NAME        = "ecommerce_jit_workflow"
+      SCHEDULE_RULE   = "sfn-every-five-minutes"
     }
   }
 }
@@ -184,15 +185,16 @@ resource "aws_sfn_state_machine" "jit_workflow" {
 }
 
 # Optional: EventBridge schedule -> Step Functions (toggleable)
-resource "aws_cloudwatch_event_rule" "sfn_every_minute" {
+resource "aws_cloudwatch_event_rule" "sfn_every_five" {
   count               = var.enable_sfn_schedule ? 1 : 0
-  name                = "sfn-every-minute"
-  schedule_expression = "rate(1 minute)"
+  name                = "sfn-every-five-minutes"
+  schedule_expression = "rate(5 minutes)"
+  state               = "DISABLED"
 }
 
 resource "aws_cloudwatch_event_target" "sfn_target" {
   count     = var.enable_sfn_schedule ? 1 : 0
-  rule      = aws_cloudwatch_event_rule.sfn_every_minute[0].name
+  rule      = aws_cloudwatch_event_rule.sfn_every_five[0].name
   target_id = "start-jit-workflow"
   arn       = aws_sfn_state_machine.jit_workflow.arn
   role_arn  = var.events_to_sfn_role_arn

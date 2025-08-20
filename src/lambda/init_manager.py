@@ -30,7 +30,6 @@ def _get_sfn_arn():
     try:
         account = boto3.client("sts").get_caller_identity()["Account"]
     except Exception:
-        # Last-ditch: let it be None so caller can skip starting SFN if we can't resolve
         return None
     return f"arn:aws:states:{region}:{account}:stateMachine:{name}"
 
@@ -71,13 +70,30 @@ def lambda_handler(event, context):
     bucket = os.environ["BUCKET_NAME"]
     threshold = float(os.environ.get("THRESHOLD", 300))
     target_function = os.environ.get("TARGET_FUNCTION", "target_function")
+    # <- add this env in Terraform to the rule name
+    schedule_rule = os.environ.get("SCHEDULE_RULE")
 
     s3 = boto3.client("s3")
     lam = boto3.client("lambda")
     rt = boto3.client("sagemaker-runtime")
+    events = boto3.client("events")  # <- NEW
 
-    # ---- DEMO-GATE: If API Gateway POST called us, trigger SFN FIRST ----------
+    # ---- DEMO-GATE: If API Gateway POST called us, enable schedule + trigger SFN FIRST ----------
     if _is_apigw(event) and event.get("httpMethod") == "POST":
+        # 1) Enable the disabled EventBridge rule so autoschedule takes over after the demo click
+        if schedule_rule:
+            try:
+                state = (events.describe_rule(
+                    Name=schedule_rule) or {}).get("State")
+                if state != "ENABLED":
+                    events.enable_rule(Name=schedule_rule)
+                    print(f"[demo] Enabled schedule rule: {schedule_rule}")
+                else:
+                    print(f"[demo] Schedule already enabled: {schedule_rule}")
+            except Exception as e:
+                print(f"[warn] Enabling schedule failed: {e}")
+
+        # 2) Kick the Step Function first (so the supervisor sees an immediate run)
         sfn_arn = _get_sfn_arn()
         if sfn_arn:
             try:
