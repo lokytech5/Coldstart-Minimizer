@@ -6,6 +6,7 @@ import ForecastChart from "../app/components/ForecastChart";
 import StatusPill from "../app/components/StatusPill";
 import clsx from "clsx";
 import Spinner from "./components/Spinner";
+import LiveLogs from "./components/LiveLogs";
 
 export default function JITDashboard() {
   const [status, setStatus] = useState<JitStatus | null>(null);
@@ -171,36 +172,42 @@ export default function JITDashboard() {
 
         {/* Raw + How-to */}
         <div className="flex flex-col gap-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
-            <div className="mb-2 text-sm font-medium text-slate-200">Raw response</div>
-            <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-200 ring-1 ring-slate-800">
-{JSON.stringify(status ?? { message: "No data yet" }, null, 2)}
-            </pre>
-          </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
-            <div className="mb-2 text-sm font-medium text-slate-200">Manual init call</div>
-            <p className="mb-2 text-xs text-slate-400">
-              We send a POST to <span className="font-mono">{API_BASE ? `${API_BASE}/jit-status` : "/jit-status"}</span> with:
-            </p>
-            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200 ring-1 ring-slate-700">
-              {'{"Input":{"action":"init"}}'}
-            </code>
-            <div className="mt-3">
-              <button
-                onClick={onInit}
-                disabled={initLoading}
-                className={clsx(
-                  "inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500",
-                  initLoading && "opacity-60"
-                )}
-              >
-                <Power className="h-4 w-4" />
-                Send init payload
-              </button>
-            </div>
-          </div>
-        </div>
+           {/* NEW: Live logs */}
+   <LiveLogs base={API_BASE} mock={mockMode} />
+
+  {/* Raw response */}
+  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+    <div className="mb-2 text-sm font-medium text-slate-200">Raw response</div>
+    <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-200 ring-1 ring-slate-800">
+{JSON.stringify(status ?? { message: "No data yet" }, null, 2)}
+    </pre>
+  </div>
+
+  {/* Manual init */}
+  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+    <div className="mb-2 text-sm font-medium text-slate-200">Manual init call</div>
+    <p className="mb-2 text-xs text-slate-400">
+      We send a POST to <span className="font-mono">{API_BASE ? `${API_BASE}/jit-status` : "/jit-status"}</span> with:
+    </p>
+    <code className="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200 ring-1 ring-slate-700">
+      {'{"Input":{"action":"init"}}'}
+    </code>
+    <div className="mt-3">
+      <button
+        onClick={onInit}
+        disabled={initLoading}
+        className={clsx(
+          "inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500",
+          initLoading && "opacity-60"
+        )}
+      >
+        <Power className="h-4 w-4" />
+        Send init payload
+      </button>
+    </div>
+  </div>
+</div>
       </section>
 
       {/* Footer */}
@@ -208,15 +215,6 @@ export default function JITDashboard() {
         Built for the cold-start demo · {mockMode ? "Mock mode" : "Live mode"}
       </footer>
 
-      {/* OPTIONAL: soft overlay while initializing */}
-      {/* {initLoading && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 backdrop-blur-sm">
-          <div className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 ring-1 ring-slate-700">
-            <Spinner size={22} />
-            <span className="text-sm text-slate-200">Initializing JIT…</span>
-          </div>
-        </div>
-      )} */}
     </main>
   );
 }
