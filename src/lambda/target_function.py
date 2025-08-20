@@ -73,7 +73,12 @@ def lambda_handler(event, context):
 
     exec_ms = (time.time() - t0) * 1000.0
     logger.info(
-        f"[WARM-COLD] done in {exec_ms:.2f} ms | warm={not cold} | jit={jit_prewarm} | size={WORK_SIZE}")
+        "[WARM-COLD] done in %.2f ms | warm=%s | jit=%s | size=%s",
+        exec_ms,
+        not cold,
+        jit_prewarm,
+        WORK_SIZE,
+    )
 
     # 5) Emit metrics for dashboards
     _emit_emf(context.function_name, cold, exec_ms)
