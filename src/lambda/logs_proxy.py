@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import boto3
 from datetime import datetime, timedelta, timezone
 
@@ -22,9 +21,9 @@ def _response(status, body):
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "GET,OPTIONS"
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
         },
-        "body": json.dumps(body)
+        "body": json.dumps(body),
     }
 
 
@@ -36,8 +35,9 @@ def lambda_handler(event, context):
 
     # time window
     minutes = int(qsp.get("minutes", "15"))
-    start_ts = int((datetime.now(timezone.utc) -
-                   timedelta(minutes=minutes)).timestamp() * 1000)
+    start_ts = int(
+        (datetime.now(timezone.utc) - timedelta(minutes=minutes)).timestamp() * 1000
+    )
 
     # optional CloudWatch Logs filterPattern (e.g., WARM-COLD, ERROR, ?WarmStart=1)
     pattern = qsp.get("pattern")  # None means no server-side filter
@@ -48,7 +48,7 @@ def lambda_handler(event, context):
         "logGroupName": group,
         "startTime": start_ts,
         "interleaved": True,
-        "limit": limit
+        "limit": limit,
     }
     if pattern:
         kwargs["filterPattern"] = pattern
@@ -65,14 +65,14 @@ def lambda_handler(event, context):
     items = []
     for ev in resp.get("events", []):
         items.append({
-            "ts": datetime.fromtimestamp(ev["timestamp"]/1000, tz=timezone.utc).isoformat(),
+            "ts": datetime.fromtimestamp(ev["timestamp"] / 1000, tz=timezone.utc).isoformat(),
             "message": ev.get("message", ""),
-            "stream": ev.get("logStreamName", "")
+            "stream": ev.get("logStreamName", ""),
         })
 
     return _response(200, {
         "group": group,
         "count": len(items),
         "items": items,
-        "next": resp.get("nextToken")  # pass back for pagination
+        "next": resp.get("nextToken"),  # pass back for pagination
     })
