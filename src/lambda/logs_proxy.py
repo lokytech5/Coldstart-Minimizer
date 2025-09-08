@@ -13,6 +13,10 @@ LOG_GROUPS = {
     "sfn": os.environ.get("LOG_GROUP_SFN", "/aws/states/ecommerce_jit_workflow"),
 }
 
+orders_group = os.environ.get("LOG_GROUP_ORDERS")
+if orders_group:
+    LOG_GROUPS["orders"] = orders_group  # enables /logs?group=orders
+
 
 def _response(status, body):
     return {

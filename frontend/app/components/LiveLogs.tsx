@@ -6,12 +6,7 @@ import clsx from "clsx";
 import Spinner from "./Spinner";
 import { fetchLogs, type LogsItem, type LogsResponse } from "@/app/lib/api";
 
-type Props = {
-  base: string;
-  mock: boolean;
-  pollMs?: number;
-};
-
+type Props = { base: string; mock: boolean; pollMs?: number };
 type GroupKey = "target" | "init" | "collector" | "sfn";
 
 const GROUPS: { key: GroupKey; label: string }[] = [
@@ -24,38 +19,22 @@ const GROUPS: { key: GroupKey; label: string }[] = [
 const PRESETS = [
   { label: "All", value: "" },
   { label: "Errors", value: "ERROR" },
-  { label: "Warm", value: "{ $.WarmStart = 1 }" }, // JSON filter
+  { label: "Warm", value: "{ $.WarmStart = 1 }" },
   { label: "Cold", value: "{ $.WarmStart = 0 }" },
   { label: "Reports", value: "REPORT" },
 ];
 
 /* ---------------- SFN helpers (label-first rendering) ---------------- */
-
 function parseJSONSafe(s: string): any | null {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(s); } catch { return null; }
 }
-
-// Label pill text for SFN state
 function sfnStateLabel(obj: any): string {
-  return (
-    obj?.details?.name ??
-    obj?.details?.resource ??
-    obj?.details?.resourceType ??
-    "Step"
-  );
+  return obj?.details?.name ?? obj?.details?.resource ?? obj?.details?.resourceType ?? "Step";
 }
-
-// Short execution id tail for the bracket tag
 function sfnExecTail(obj: any): string | null {
   const tail = (obj?.execution_arn as string | undefined)?.split(":").pop();
   return tail ? tail.slice(-8) : null;
 }
-
-// Color for the status/type badge
 function sfnTypeClass(type?: string) {
   switch (type) {
     case "ExecutionStarted":
@@ -75,10 +54,19 @@ function sfnTypeClass(type?: string) {
       return "bg-slate-700/40 text-slate-300 ring-slate-600/40";
   }
 }
-
-// Blue label pill for the state name
 function sfnLabelClass() {
   return "bg-sky-500/10 text-sky-300 ring-sky-400/20";
+}
+
+/* ---------------- Warm/Cold counters (scan current page) ---------------- */
+function extractWarmStart(msg: string): 0 | 1 | null {
+  const j = parseJSONSafe(msg);
+  if (j && typeof j === "object" && typeof j.WarmStart === "number") {
+    return j.WarmStart === 1 ? 1 : 0;
+  }
+  const m = msg.match(/"WarmStart"\s*:\s*(\d+)/);
+  if (m) return Number(m[1]) === 1 ? 1 : 0;
+  return null;
 }
 
 export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
@@ -97,10 +85,7 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
   const seen = useRef<Set<string>>(new Set());
 
   const clearAll = useCallback(() => {
-    setItems([]);
-    setNextToken(undefined);
-    setLastUpdated(null);
-    seen.current.clear();
+    setItems([]); setNextToken(undefined); setLastUpdated(null); seen.current.clear();
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -109,60 +94,39 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [autoScroll]);
 
-  const merge = useCallback(
-    (resp: LogsResponse) => {
-      const fresh: LogsItem[] = [];
-      for (const it of resp.items) {
-        const key = `${it.ts}|${it.stream}|${it.message}`;
-        if (!seen.current.has(key)) {
-          seen.current.add(key);
-          fresh.push(it);
-        }
-      }
-      if (fresh.length) {
-        setItems((prev) => {
-          const merged = [...prev, ...fresh];
-          const last = merged[merged.length - 1];
-          if (last?.ts) setLastUpdated(last.ts);
-          return merged;
-        });
-        setTimeout(scrollToBottom, 0);
-      }
-      setNextToken(resp.next);
-    },
-    [scrollToBottom]
-  );
+  const merge = useCallback((resp: LogsResponse) => {
+    const fresh: LogsItem[] = [];
+    for (const it of resp.items) {
+      const key = `${it.ts}|${it.stream}|${it.message}`;
+      if (!seen.current.has(key)) { seen.current.add(key); fresh.push(it); }
+    }
+    if (fresh.length) {
+      setItems(prev => {
+        const merged = [...prev, ...fresh];
+        const last = merged[merged.length - 1];
+        if (last?.ts) setLastUpdated(last.ts);
+        return merged;
+      });
+      setTimeout(scrollToBottom, 0);
+    }
+    setNextToken(resp.next);
+  }, [scrollToBottom]);
 
-  const load = useCallback(
-    async ({ reset = false }: { reset?: boolean } = {}) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const resp = await fetchLogs({
-          base,
-          mock,
-          group,
-          minutes,
-          pattern,
-          limit: 100,
-          next: reset ? undefined : nextToken,
-        });
-        merge(resp);
-        setLastUpdated((prev) => prev ?? new Date().toISOString());
-      } catch (e: any) {
-        setError(e?.message ?? "Failed to load logs");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [base, mock, group, minutes, pattern, nextToken, merge]
-  );
+  const load = useCallback(async ({ reset = false }: { reset?: boolean } = {}) => {
+    setLoading(true); setError(null);
+    try {
+      const resp = await fetchLogs({
+        base, mock, group, minutes, pattern, limit: 100,
+        next: reset ? undefined : nextToken,
+      });
+      merge(resp);
+      setLastUpdated(prev => prev ?? new Date().toISOString());
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load logs");
+    } finally { setLoading(false); }
+  }, [base, mock, group, minutes, pattern, nextToken, merge]);
 
-  useEffect(() => {
-    clearAll();
-    load({ reset: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, minutes, pattern]);
+  useEffect(() => { clearAll(); load({ reset: true }); /* eslint-disable-next-line */ }, [group, minutes, pattern]);
 
   useEffect(() => {
     if (!live) return;
@@ -171,11 +135,21 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
   }, [live, load, pollMs]);
 
   const onScroll = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
+    const el = listRef.current; if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     setAutoScroll(nearBottom);
   }, []);
+
+  // count warm/cold from current page of lines (inside component!)
+  const warmCold = useMemo(() => {
+    let warm = 0, cold = 0;
+    for (const it of items) {
+      const v = extractWarmStart(it.message);
+      if (v === 1) warm++;
+      else if (v === 0) cold++;
+    }
+    return { warm, cold };
+  }, [items]);
 
   // colorize plain messages (non-SFN)
   const tint = (m: string) => {
@@ -187,40 +161,51 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
     return "text-slate-200";
   };
 
-  const headerRight = useMemo(
-    () => (
-      <div className="flex items-center gap-3">
-        <div className="text-[11px] text-slate-500">
-          {lastUpdated ? <>Updated {new Date(lastUpdated).toLocaleTimeString()}</> : "—"}
+  const headerRight = useMemo(() => (
+    <div className="flex items-center gap-3">
+      {/* Warm/Cold chips — only for target_function to avoid confusion */}
+      {group === "target" && (
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="rounded-full border border-emerald-700/30 bg-emerald-600/10 px-2 py-0.5 font-medium text-emerald-300">
+            Warm {warmCold.warm}
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 font-medium text-slate-300">
+            Cold {warmCold.cold}
+          </span>
         </div>
-        <button
-          onClick={() => setLive((v) => !v)}
-          className={clsx(
-            "inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1",
-            live
-              ? "bg-emerald-600/15 text-emerald-300 ring-emerald-600/30 hover:bg-emerald-600/25"
-              : "bg-slate-800 text-slate-300 ring-slate-700 hover:bg-slate-700"
-          )}
-          title={live ? "Pause live tail" : "Resume live tail"}
-        >
-          {live ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          {live ? "Live" : "Paused"}
-        </button>
-        <button
-          onClick={() => load()}
-          className={clsx(
-            "inline-flex items-center gap-2 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700",
-            loading && "opacity-60"
-          )}
-          title="Refresh now"
-        >
-          <RefreshCw className={clsx("h-3.5 w-3.5", loading && "animate-spin")} />
-          Refresh
-        </button>
+      )}
+
+      <div className="text-[11px] text-slate-500">
+        {lastUpdated ? <>Updated {new Date(lastUpdated).toLocaleTimeString()}</> : "—"}
       </div>
-    ),
-    [live, loading, load, lastUpdated]
-  );
+
+      <button
+        onClick={() => setLive(v => !v)}
+        className={clsx(
+          "inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1",
+          live
+            ? "bg-emerald-600/15 text-emerald-300 ring-emerald-600/30 hover:bg-emerald-600/25"
+            : "bg-slate-800 text-slate-300 ring-slate-700 hover:bg-slate-700"
+        )}
+        title={live ? "Pause live tail" : "Resume live tail"}
+      >
+        {live ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        {live ? "Live" : "Paused"}
+      </button>
+
+      <button
+        onClick={() => load()}
+        className={clsx(
+          "inline-flex items-center gap-2 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700",
+          loading && "opacity-60"
+        )}
+        title="Refresh now"
+      >
+        <RefreshCw className={clsx("h-3.5 w-3.5", loading && "animate-spin")} />
+        Refresh
+      </button>
+    </div>
+  ), [live, loading, load, lastUpdated, warmCold, group]); // <-- include deps
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
@@ -240,11 +225,7 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
           onChange={(e) => setGroup(e.target.value as GroupKey)}
           className="rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-600"
         >
-          {GROUPS.map((g) => (
-            <option key={g.key} value={g.key}>
-              {g.label}
-            </option>
-          ))}
+          {GROUPS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
         </select>
 
         <select
@@ -252,11 +233,7 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
           onChange={(e) => setMinutes(parseInt(e.target.value, 10))}
           className="rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-600"
         >
-          {[5, 15, 30, 60].map((m) => (
-            <option key={m} value={m}>
-              Last {m} min
-            </option>
-          ))}
+          {[5, 15, 30, 60].map((m) => <option key={m} value={m}>Last {m} min</option>)}
         </select>
 
         <div className="flex items-center gap-2">
@@ -269,35 +246,10 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
         </div>
       </div>
 
-      {/* Quick filter chips */}
-      <div className="mb-3 flex flex-wrap gap-2">
-        {PRESETS.map((p) => (
-          <button
-            key={p.label}
-            onClick={() => setPattern(p.value)}
-            className={clsx(
-              "rounded-full px-2.5 py-1 text-xs ring-1 transition",
-              pattern === p.value
-                ? "bg-indigo-600 text-white ring-indigo-500"
-                : "bg-slate-800 text-slate-300 ring-slate-700 hover:bg-slate-700"
-            )}
-            title={`Filter: ${p.value || "none"}`}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
       {/* List */}
-      <div
-        ref={listRef}
-        onScroll={onScroll}
-        className="h-64 overflow-auto rounded-xl bg-slate-950 p-3 ring-1 ring-slate-800"
-      >
+      <div ref={listRef} onScroll={onScroll} className="h-64 overflow-auto rounded-xl bg-slate-950 p-3 ring-1 ring-slate-800">
         {items.length === 0 && !loading && !error && (
-          <div className="grid h-full place-items-center text-sm text-slate-400">
-            No log lines yet.
-          </div>
+          <div className="grid h-full place-items-center text-sm text-slate-400">No log lines yet.</div>
         )}
 
         {items.map((it, idx) => {
@@ -310,31 +262,19 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
           return (
             <div key={`${it.ts}-${idx}`} className="whitespace-pre-wrap font-mono text-xs leading-5">
               <span className="text-slate-500">{new Date(it.ts).toLocaleTimeString()} </span>
-
-              {/* Bracket tag */}
               <span className="text-slate-400">
                 {isSFN ? `[SFN${execTail ? `:${execTail}` : ""}]` : `[${it.stream.split("/").at(-1)}]`}
               </span>{" "}
-
-              {/* Label-first for SFN */}
               {isSFN && label && (
                 <span className={`ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] ring-1 ${sfnLabelClass()}`}>
                   {label}
                 </span>
               )}{" "}
-
-              {/* Status/type badge */}
               {isSFN && sfnType && (
-                <span
-                  className={`ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] ring-1 ${sfnTypeClass(
-                    sfnType
-                  )}`}
-                >
+                <span className={`ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] ring-1 ${sfnTypeClass(sfnType)}`}>
                   {sfnType}
                 </span>
               )}{" "}
-
-              {/* Message */}
               <span className={tint(it.message)}>{it.message.trimEnd()}</span>
             </div>
           );
@@ -342,8 +282,7 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
 
         {loading && (
           <div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-400">
-            <Spinner size={14} />
-            <span>Loading…</span>
+            <Spinner size={14} /><span>Loading…</span>
           </div>
         )}
         {error && (
@@ -373,10 +312,7 @@ export default function LiveLogs({ base, mock, pollMs = 3000 }: Props) {
             Load more
           </button>
           <button
-            onClick={() => {
-              clearAll();
-              load({ reset: true });
-            }}
+            onClick={() => { clearAll(); load({ reset: true }); }}
             className="rounded-md bg-slate-800 px-2 py-1 text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700"
           >
             Reset

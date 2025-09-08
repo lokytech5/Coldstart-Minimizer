@@ -34,6 +34,33 @@ def _get_sfn_arn():
     return f"arn:aws:states:{region}:{account}:stateMachine:{name}"
 
 
+def _get_target(event):
+    """Resolve target function from body/query with allow-list enforcement."""
+    default = os.environ.get("TARGET_FUNCTION", "target_function")
+    allowed = [x.strip() for x in (os.environ.get(
+        "ALLOWED_TARGETS") or "").split(",") if x.strip()]
+
+    body = {}
+    if isinstance(event, dict) and event.get("body"):
+        s = event["body"]
+        if event.get("isBase64Encoded"):
+            s = base64.b64decode(s).decode()
+        try:
+            body = json.loads(s)
+        except Exception:
+            pass
+
+    qsp = (event.get("queryStringParameters") or {})
+    target = (body.get("target")
+              or (body.get("Input") or {}).get("target")
+              or qsp.get("target")
+              or default)
+
+    if allowed and target not in allowed:
+        raise ValueError(f"target '{target}' not allowed")
+    return target
+
+
 def lambda_handler(event, context):
     # ---- Inputs / mode -------------------------------------------------------
     action = (event.get("Input", {}) or {}).get("action", "check")
@@ -163,12 +190,16 @@ def lambda_handler(event, context):
         client_context = base64.b64encode(json.dumps(
             {"custom": {"COLD_START": "false"}}
         ).encode()).decode()
+        target_to_invoke = _get_target(event) if _is_apigw(
+            event) else os.environ.get("TARGET_FUNCTION", "target_function")
+
         lam.invoke(
-            FunctionName=target_function,
+            FunctionName=target_to_invoke,
             InvocationType="Event",
             ClientContext=client_context
         )
-        body = {"status": "initialized", "mode": mode}
+        body = {"status": "initialized",
+                "mode": mode, "target": target_to_invoke}
     else:  # "check"
         body = result
 

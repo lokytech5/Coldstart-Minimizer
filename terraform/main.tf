@@ -45,7 +45,6 @@ variable "model_data_url" {
   type        = string
 }
 
-# Existing IAM role that lets EventBridge call Step Functions
 variable "events_to_sfn_role_arn" {
   type        = string
   description = "Existing IAM role ARN for EventBridge to StartExecution on the state machine"
@@ -87,7 +86,7 @@ resource "aws_lambda_function" "target_function" {
 }
 
 # =========================
-# Lambda: init_manager (API)
+# Lambda: init_manager
 # =========================
 resource "aws_lambda_function" "init_manager" {
   function_name    = "init_manager"
@@ -99,7 +98,6 @@ resource "aws_lambda_function" "init_manager" {
   source_code_hash = filebase64sha256("${path.module}/../src/lambda/init_manager.zip")
   timeout          = 30
 
-  # IMPORTANT: Use SFN_NAME (static) to avoid TF dependency cycles.
   environment {
     variables = {
       BUCKET_NAME     = var.bucket_name
@@ -108,6 +106,8 @@ resource "aws_lambda_function" "init_manager" {
       TARGET_FUNCTION = "target_function"
       SFN_NAME        = "ecommerce_jit_workflow"
       SCHEDULE_RULE   = "sfn-every-five-minutes"
+
+      ALLOWED_TARGETS = var.demo_orders_lambda_name != "" ? "target_function,${var.demo_orders_lambda_name}" : "target_function"
     }
   }
 }
@@ -128,7 +128,7 @@ resource "aws_lambda_function" "data_collector" {
 # CloudWatch schedule for data_collector
 resource "aws_cloudwatch_event_rule" "collect_metrics_rule" {
   name                = "collect_metrics"
-  schedule_expression = "rate(5 minutes)"
+  schedule_expression = "rate(1 minute)"
   depends_on          = [aws_lambda_function.data_collector]
 }
 
@@ -164,7 +164,6 @@ resource "aws_sfn_state_machine" "jit_workflow" {
     log_destination        = "${aws_cloudwatch_log_group.sfn_logs.arn}:*"
   }
 
-  # Calls init_manager synchronously with "check"; if trigger is true, calls it again with "init".
   definition = jsonencode({
     Comment = "Workflow to handle JIT Lambda initialization",
     StartAt = "CheckForecast",
@@ -201,11 +200,10 @@ resource "aws_sfn_state_machine" "jit_workflow" {
   })
 }
 
-# Optional: EventBridge schedule -> Step Functions (toggleable)
 resource "aws_cloudwatch_event_rule" "sfn_every_five" {
   count               = var.enable_sfn_schedule ? 1 : 0
   name                = "sfn-every-five-minutes"
-  schedule_expression = "rate(5 minutes)"
+  schedule_expression = "rate(1 minute)"
   state               = "DISABLED"
 }
 
@@ -372,6 +370,7 @@ resource "aws_lambda_function" "logs_proxy" {
       LOG_GROUP_INIT      = "/aws/lambda/${aws_lambda_function.init_manager.function_name}"
       LOG_GROUP_COLLECTOR = "/aws/lambda/${aws_lambda_function.data_collector.function_name}"
       LOG_GROUP_SFN       = aws_cloudwatch_log_group.sfn_logs.name
+      LOG_GROUP_ORDERS    = var.demo_orders_lambda_name != "" ? "/aws/lambda/${var.demo_orders_lambda_name}" : ""
     }
   }
 }
