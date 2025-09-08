@@ -96,7 +96,7 @@ def lambda_handler(event, context):
     endpoint_name = os.environ["ENDPOINT_NAME"]
     bucket = os.environ["BUCKET_NAME"]
     threshold = float(os.environ.get("THRESHOLD", 300))
-    target_function = os.environ.get("TARGET_FUNCTION", "target_function")
+    # target_function = os.environ.get("TARGET_FUNCTION", "target_function")
     # <- add this env in Terraform to the rule name
     schedule_rule = os.environ.get("SCHEDULE_RULE")
 
